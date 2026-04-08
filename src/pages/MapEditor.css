@@ -1,0 +1,11 @@
+.editor-page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.editor-map-area {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
