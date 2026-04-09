@@ -2,6 +2,18 @@
 // MindForge AI — Type Definitions
 // ==========================================
 
+/** 项目级 AI 人设配置 */
+export interface ProjectAIConfig {
+  /** AI 扮演的角色描述，例如 "你是一位硅谷顶尖的 AI 基础设施架构师" */
+  persona: string;
+  /** 解释概念时的深度风格 */
+  explainStyle: 'beginner' | 'intermediate' | 'expert';
+  /** 自定义的解释 prompt（可选） */
+  customExplainPrompt?: string;
+  /** 自定义的细化 prompt（可选） */
+  customRefinePrompt?: string;
+}
+
 /** 思维导图节点 */
 export interface MindMapNode {
   id: string;
@@ -26,6 +38,7 @@ export interface MindMapProject {
   title: string;
   description: string;
   root: MindMapNode;
+  aiConfig?: ProjectAIConfig;
   createdAt: number;
   updatedAt: number;
 }

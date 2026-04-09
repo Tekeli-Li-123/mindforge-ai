@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Markmap } from 'markmap-view';
 import { Transformer } from 'markmap-lib';
-import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Map, Sparkles, Check, X } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, Map, Sparkles, Check, X, Brain, Wand2, HelpCircle, MessageSquare } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import Modal from '../common/Modal';
 import { useMindMapStore } from '../../stores/mindmapStore';
 import { useSettingsStore, defaultAISettings } from '../../stores/settingsStore';
-import { nodeToMarkdown, findNodePath, generateId, parseMarkdownToMindMapNode, decodeHTMLEntities } from '../../utils/mindmapHelpers';
+import type { MindMapNode } from '../../types';
+import { findNodePath, generateId, parseMarkdownToMindMapNode, decodeHTMLEntities, convertToMarkmapINode } from '../../utils/mindmapHelpers';
 import ContextMenu, { type ContextMenuPosition } from './ContextMenu';
-import { generateMindMap, explainConcept, reorganizeMindMap } from '../../services/aiService';
+import { generateMindMap, explainConcept, reorganizeMindMap, generateProjectPersona } from '../../services/aiService';
 import './MindMapView.css';
 
 const transformer = new Transformer();
@@ -16,8 +17,22 @@ const transformer = new Transformer();
 export default function MindMapView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | null>(null);
-  const { currentProject, updateNode, deleteNode, deleteNodes, appendChildren } = useMindMapStore();
+  const { 
+    currentProject, 
+    updateNode, 
+    deleteNode, 
+    deleteNodes, 
+    appendChildren, 
+    updateProjectAIConfig,
+    toggleChat,
+    isChatOpen,
+    selectNode
+  } = useMindMapStore();
   
+  // Track previous root reference to avoid unnecessary markmap re-renders
+  // (e.g. when only aiConfig or updatedAt changes, not the tree itself)
+  const prevRootRef = useRef<MindMapNode | null>(null);
+
   // Context Menu State
   const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPosition | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -58,34 +73,83 @@ export default function MindMapView() {
   // Refine Config Modal State
   const [refineConfig, setRefineConfig] = useState<{
     isOpen: boolean;
-    nodeId: string;
+    nodeIds: string[];
     depth: number;
     maxNodes: number;
   } | null>(null);
+
+  // Project AI Config Modal State
+  const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
+  const [tempPersona, setTempPersona] = useState('');
+  const [isPersonaGenerating, setIsPersonaGenerating] = useState(false);
+
+  // Track rendering state
+  const isRendering = useRef(false);
 
   // Initialize and update markmap
   useEffect(() => {
     if (!svgRef.current || !currentProject) return;
 
-    const markdown = nodeToMarkdown(currentProject.root);
-    const { root } = transformer.transform(markdown);
+    // Skip redundant updates if the tree reference is the same
+    if (mmRef.current && prevRootRef.current === currentProject.root) return;
+    prevRootRef.current = currentProject.root;
 
-    if (!mmRef.current) {
-      // First render: create Markmap instance
-      mmRef.current = Markmap.create(svgRef.current, {
-        autoFit: true,
-        duration: 300,
-        maxWidth: 250, // 增加自适应换行最大宽度
-        paddingX: 40,
-        paddingY: 30,  // 设置适当的垂直间距
-      }, root);
-    } else {
-      // Subsequent renders: update data
-      mmRef.current.setData(root).finally(() => {
-        mmRef.current?.fit();
-      });
-    }
+    const render = async () => {
+      if (!svgRef.current || isRendering.current) return;
+      isRendering.current = true;
+
+      try {
+        const rootAST = convertToMarkmapINode(currentProject.root);
+        
+        if (!mmRef.current) {
+          mmRef.current = Markmap.create(svgRef.current, {
+            autoFit: true,
+            duration: 300,
+            maxWidth: 250,
+            paddingX: 40,
+            paddingY: 30,
+          }, rootAST);
+        } else {
+          // Interrupt all ongoing d3 transitions to prevent NaN interpolation conflicts
+          const svg = (mmRef.current as any).svg;
+          if (svg && svg.selectAll) {
+            svg.selectAll('*').interrupt();
+          }
+          
+          await mmRef.current.setData(rootAST);
+          
+          // Only fit if the container has dimensions
+          const { width, height } = svgRef.current.getBoundingClientRect();
+          if (width > 0 && height > 0) {
+            mmRef.current.fit();
+          }
+        }
+      } catch (err) {
+        console.error('Markmap render error:', err);
+      } finally {
+        isRendering.current = false;
+      }
+    };
+
+    render();
   }, [currentProject]);
+
+  // Handle container resizing robustly
+  useEffect(() => {
+    if (!svgRef.current) return;
+    
+    const observer = new ResizeObserver(() => {
+      if (mmRef.current) {
+        const { width, height } = svgRef.current!.getBoundingClientRect();
+        if (width > 0 && height > 0) {
+          mmRef.current.fit();
+        }
+      }
+    });
+    
+    observer.observe(svgRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Synchronize multi-select classes via DOM mapping to bypass markmap redraw
   useEffect(() => {
@@ -156,13 +220,15 @@ export default function MindMapView() {
             return next;
           });
         } else {
-          // Normal click clears existing multi-select
+          // Normal click clears existing multi-select and selects the node for chat
           setSelectedNodes(new Set());
+          selectNode(nodeId);
         }
       }
     } else {
       // Clicked on empty space
       setSelectedNodes(new Set());
+      selectNode(null);
     }
   };
 
@@ -298,142 +364,190 @@ export default function MindMapView() {
     setInlineEditor(null);
   };
 
-  const handleAction = async (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'ai_refine') => {
+  const handleAction = async (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize') => {
     if (!activeNodeId || !currentProject) return;
 
+    const targetNodeIds = selectedNodes.has(activeNodeId) && selectedNodes.size > 1 
+      ? Array.from(selectedNodes) 
+      : [activeNodeId];
+
     if (action === 'delete') {
-      deleteNode(activeNodeId);
+      deleteNodes(targetNodeIds);
+      setSelectedNodes(new Set());
+    } else if (action === 'delete_children') {
+      targetNodeIds.forEach(id => updateNode(id, { children: [] }));
+      setSelectedNodes(new Set());
     } else if (action === 'edit' || action === 'add_child') {
+      // 只能单节点编辑
       openInlineEditor(action, activeNodeId);
     } else if (action === 'ai_refine') {
       setRefineConfig({
         isOpen: true,
-        nodeId: activeNodeId,
+        nodeIds: targetNodeIds,
         depth: 2,
-        maxNodes: 5
+        maxNodes: 0 // 0 means Auto
       });
-    } else if (action === 'explain') {
-      let targetNodeData: any = null;
-      const findNode = (n: any) => {
-        if (n.id === activeNodeId) targetNodeData = n;
-        n.children.forEach(findNode);
-      };
-      findNode(currentProject.root);
-
-      const path = findNodePath(currentProject.root, activeNodeId);
-      if (!path) return;
+    } else if (action === 'explain' || action === 'explain_regen') {
+      const isMulti = targetNodeIds.length > 1;
+      const isRegen = action === 'explain_regen';
       
-      const targetName = decodeHTMLEntities(path[path.length - 1]);
-      const contextString = decodeHTMLEntities(path.join(' > '));
-      
-      // Cache Strategy: read explanation immediately
-      if (targetNodeData?.explanation) {
-        setExplanation({ title: targetName, content: targetNodeData.explanation, isOpen: true });
-        return;
+      if (isMulti) {
+        setExplanation({ title: isRegen ? '批量重新生成' : '批量解释', content: `正在思考 ${targetNodeIds.length} 个节点的解释... ✨`, isOpen: true });
+      } else {
+        const path = findNodePath(currentProject.root, targetNodeIds[0]);
+        const targetName = path ? decodeHTMLEntities(path[path.length - 1].content) : '';
+        setExplanation({ title: targetName, content: `正在${isRegen ? '重新' : ''}思考解释... ✨`, isOpen: true });
       }
 
-      setExplanation({ title: targetName, content: '正在思考解释，请稍候... ✨', isOpen: true });
-      
-      try {
-        const result = await explainConcept(targetName, contextString);
-        // Persist explanation and add tag
-        const currentTags = targetNodeData?.tags || [];
-        if (!currentTags.includes('explained')) {
-           currentTags.push('explained');
+      let combinedExp = '';
+      for (const tId of targetNodeIds) {
+        let targetNodeData: any = null;
+        const findNode = (n: any) => {
+          if (n.id === tId) targetNodeData = n;
+          n.children.forEach(findNode);
+        };
+        findNode(currentProject.root);
+
+        const path = findNodePath(currentProject.root, tId);
+        if (!path) continue;
+        
+        const targetName = decodeHTMLEntities(path[path.length - 1].content);
+        const contextString = decodeHTMLEntities(path.map(n => n.content).join(' > '));
+        
+        // 只有在非重新生成模式下才使用缓存
+        if (!isRegen && targetNodeData?.explanation) {
+          combinedExp += `### ${targetName}\n${targetNodeData.explanation}\n\n`;
+          continue;
         }
-        updateNode(activeNodeId, { explanation: result, tags: currentTags });
-        setExplanation({ title: targetName, content: result, isOpen: true });
-      } catch(e: any) {
-        setExplanation({ title: targetName, content: `解释失败 😔\n${e.message}`, isOpen: true });
+
+        try {
+          const result = await explainConcept(targetName, contextString);
+          const currentTags = targetNodeData?.tags || [];
+          if (!currentTags.includes('explained')) {
+             currentTags.push('explained');
+          }
+          updateNode(tId, { explanation: result, tags: currentTags });
+          combinedExp += `### ${targetName}\n${result}\n\n`;
+          // 更新临时弹窗状态以显示进度
+          if (isMulti) setExplanation({ title: '批量解释 (处理中)', content: combinedExp + '\n*处理下一个... ✨*', isOpen: true });
+        } catch(e: any) {
+          combinedExp += `### ${targetName}\n解释失败 😔\n${e.message}\n\n`;
+        }
       }
+      const finalTitle = isMulti ? (isRegen ? '批量重构结果' : '批量解释结果') : decodeHTMLEntities(findNodePath(currentProject.root, targetNodeIds[0])?.slice(-1)[0]?.content || '');
+      setExplanation({ title: finalTitle, content: combinedExp, isOpen: true });
     } else if (action === 'reorganize') {
-      // Find the deeply nested target node structure
-      // To reorganize, we extract all its child content into markdown
-      let targetNodeData: any = null;
-      // Re-find target node in tree
-      const findNode = (n: any) => {
-        if (n.id === activeNodeId) targetNodeData = n;
-        n.children.forEach(findNode);
-      };
-      findNode(currentProject.root);
-      
-      if (!targetNodeData || targetNodeData.children.length === 0) {
-        alert('当前节点没有任何子节点，无法重组。');
-        return;
-      }
-
-      const path = findNodePath(currentProject.root, activeNodeId);
-      const targetName = path ? decodeHTMLEntities(path[path.length - 1]) : '';
-      const contextString = path ? decodeHTMLEntities(path.join(' > ')) : '';
-      
-      // Convert current children to pure markdown list block for AI
-      let childrenMarkdown = '';
-      targetNodeData.children.forEach((c: any) => {
-         childrenMarkdown += nodeToMarkdown(c, 1, true);
-      });
-
       setIsAiLoading(true);
-      updateNode(activeNodeId, { content: targetName + ' (✨ 施展魔法重组中...)' });
-      
-      try {
-        const markdown = await reorganizeMindMap(childrenMarkdown, contextString);
+
+      for (const tId of targetNodeIds) {
+        let targetNodeData: any = null;
+        const findNode = (n: any) => {
+          if (n.id === tId) targetNodeData = n;
+          n.children.forEach(findNode);
+        };
+        findNode(currentProject.root);
         
-        // Use arbitrary trick to wrap the returned content before parsing
-        const fakeRoot = `# ROOT\n${markdown}`;
-        const parsedTree = parseMarkdownToMindMapNode(fakeRoot);
+        if (!targetNodeData || targetNodeData.children.length === 0) {
+          if (targetNodeIds.length === 1) alert('当前节点没有任何子节点，无法重组。');
+          continue;
+        }
+
+        const path = findNodePath(currentProject.root, tId);
+        const targetName = path ? decodeHTMLEntities(path[path.length - 1].content) : '';
+        const contextString = path ? decodeHTMLEntities(path.map(n => n.content).join(' > ')) : '';
         
-        // Overwrite the target node's children with the new tree's children
-        updateNode(activeNodeId, { content: targetName, children: parsedTree.children });
-      } catch(e: any) {
-        alert('AI 重组失败: ' + e.message);
-        updateNode(activeNodeId, { content: targetName });
-      } finally {
-        setIsAiLoading(false);
+        let childrenMarkdown = '';
+        targetNodeData.children.forEach((c: any) => {
+           childrenMarkdown += nodeToMarkdown(c, 1, true);
+        });
+
+        updateNode(tId, { content: targetName + ' (✨ 施展魔法重组中...)' });
+        
+        try {
+          const markdown = await reorganizeMindMap(childrenMarkdown, contextString);
+          const fakeRoot = `# ROOT\n${markdown}`;
+          const parsedTree = parseMarkdownToMindMapNode(fakeRoot);
+          
+          updateNode(tId, { content: targetName, children: parsedTree.children });
+        } catch(e: any) {
+          if (targetNodeIds.length === 1) alert('AI 重组失败: ' + e.message);
+          updateNode(tId, { content: targetName });
+        }
       }
+      setIsAiLoading(false);
     }
   };
 
   const executeAiRefine = async () => {
     if (!refineConfig || !currentProject) return;
-    const { nodeId, depth, maxNodes } = refineConfig;
+    const { nodeIds, depth, maxNodes } = refineConfig;
     
     setRefineConfig(null);
-    const path = findNodePath(currentProject.root, nodeId);
-    if (!path) return;
-    
-    const targetName = decodeHTMLEntities(path[path.length - 1]);
-    const contextString = decodeHTMLEntities(path.join(' > '));
-    
     setIsAiLoading(true);
-    updateNode(nodeId, { content: targetName + ' (✨ 细化中...)' });
-    
-    try {
-      const refinePrompt = useSettingsStore.getState().aiSettings.refinePrompt || defaultAISettings.refinePrompt;
-      const limitInstruction = `严格限制生成深度不超过 ${depth} 级，且每个分支下的子节点数量最多 ${maxNodes} 个，保持精简。`;
-      
-      let compiledPrompt = refinePrompt
-        .replace(/\{\{target\}\}/g, targetName)
-        .replace(/\{\{context\}\}/g, contextString)
-        .replace(/\{\{limitInstruction\}\}/g, limitInstruction);
 
-      const markdown = await generateMindMap({ prompt: compiledPrompt });
-      
-      const parsedTree = parseMarkdownToMindMapNode(markdown);
-      const subNodes = parsedTree.children.length > 0 ? parsedTree.children : [parsedTree];
-      
-      if (subNodes.length === 1 && subNodes[0].content === targetName) {
-         appendChildren(nodeId, subNodes[0].children);
-      } else {
-         appendChildren(nodeId, subNodes);
-      }
-      
-      updateNode(nodeId, { content: targetName });
-    } catch(e: any) {
-      alert('AI 细化失败: ' + e.message);
-      updateNode(nodeId, { content: targetName });
-    } finally {
-      setIsAiLoading(false);
+    const originalNames: Record<string, string> = {};
+    for (const nId of nodeIds) {
+      const path = findNodePath(currentProject.root, nId);
+      if (!path) continue;
+      const targetName = decodeHTMLEntities(path[path.length - 1]);
+      originalNames[nId] = targetName;
+      updateNode(nId, { content: targetName + ' (✨ 细化中...)' });
     }
+    
+    for (const nId of nodeIds) {
+      const path = findNodePath(currentProject.root, nId);
+      if (!path) continue;
+      
+      const targetName = originalNames[nId] || decodeHTMLEntities(path[path.length - 1]);
+      const contextString = decodeHTMLEntities(path.join(' > '));
+      
+      try {
+        const refinePrompt = useSettingsStore.getState().aiSettings.refinePrompt || defaultAISettings.refinePrompt;
+        const limitInstruction = maxNodes === 0 
+          ? `严格限制：必须且只能生成 1 层深度的直接下级概念列表。子节点数量由你**自行判断**，找出涵盖该概念精髓所需的必要、合理的分类数即可，但绝对不要生成更深层级的次级节点！`
+          : `严格限制：必须且只能生成 1 层深度的直接下级概念列表，节点数量最多不超过 ${maxNodes} 个。绝对不要生成更深层级的次级节点！`;
+        
+        let compiledPrompt = refinePrompt
+          .replace(/\{\{target\}\}/g, targetName)
+          .replace(/\{\{context\}\}/g, contextString)
+          .replace(/\{\{limitInstruction\}\}/g, limitInstruction);
+
+        const persona = currentProject.aiConfig?.persona || "";
+        const personaPrefix = persona ? `你的人设是：${persona}\n\n` : "";
+
+        const markdown = await generateMindMap({ 
+          prompt: compiledPrompt,
+          systemPromptOverride: personaPrefix + "你是一个严格执行命令的分类提取器。你的任务仅仅是为一个概念提取出它的『直接分类或特征』。极其重要：每次只能生成 1 层扁平列表！请必须使用 Markdown 无序列表（- 或 *）来直接罗列，绝对不可使用 # 标题进行深度嵌套树化，不要任何解释。"
+        });
+        
+        // 对于单层发散的平铺列表提取，我们直接执行字符串行解析，完美规避 AST 无根节点引起的解析崩溃
+        const lines = markdown.split('\n');
+        const subNodes: any[] = [];
+        for (let line of lines) {
+           line = line.replace(/```(?:markdown)?/g, '').trim();
+           if (!line) continue;
+           const text = line.replace(/^[\s\-\*\#\d\.]+/, '').trim();
+           if (text && text.length > 0) {
+               subNodes.push({
+                   id: generateId(),
+                   content: decodeHTMLEntities(text),
+                   depth: 0,
+                   mastery: 0,
+                   expanded: true,
+                   children: []
+               });
+           }
+        }
+        
+        appendChildren(nId, subNodes);
+        
+        updateNode(nId, { content: targetName });
+      } catch(e: any) {
+        if (nodeIds.length === 1) alert('AI 细化失败: ' + e.message);
+        updateNode(nId, { content: targetName });
+      }
+    }
+    setIsAiLoading(false);
   };
 
   if (!currentProject) {
@@ -482,6 +596,26 @@ export default function MindMapView() {
         </button>
         <button className="mindmap-toolbar-btn" title="重置" onClick={() => {}}>
           <RotateCcw size={18} />
+        </button>
+        <div className="mindmap-toolbar-divider" />
+        <button 
+          className={`mindmap-toolbar-btn ${currentProject.aiConfig ? 'active' : ''}`} 
+          style={{ color: currentProject.aiConfig ? 'var(--color-accent)' : 'inherit' }}
+          onClick={() => {
+            setTempPersona(currentProject.aiConfig?.persona || '');
+            setIsAiConfigOpen(true);
+          }} 
+          title="项目 AI 人设设定"
+        >
+          <Brain size={18} />
+        </button>
+        <button 
+          className={`mindmap-toolbar-btn ${isChatOpen ? 'active' : ''}`} 
+          style={{ color: isChatOpen ? 'var(--color-accent)' : 'inherit' }}
+          onClick={toggleChat} 
+          title="打开/关闭 AI 助手"
+        >
+          <MessageSquare size={18} />
         </button>
       </div>
 
@@ -571,9 +705,21 @@ export default function MindMapView() {
         onClose={() => setExplanation(e => e ? { ...e, isOpen: false } : null)}
         title={`词条解释：${explanation?.title}`}
         footer={
-          <button className="modal-btn primary" onClick={() => setExplanation(e => e ? { ...e, isOpen: false } : null)}>
-            阅毕
-          </button>
+          <div style={{ display: 'flex', gap: '8px', width: '100%', justifyContent: 'flex-end' }}>
+            <button 
+              className="modal-btn secondary" 
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const targetId = activeNodeId;
+                if (targetId) handleAction('explain_regen');
+              }}
+            >
+              <RotateCw style={{ width: 14, height: 14, flexShrink: 0 }} /> 重新生成
+            </button>
+            <button className="modal-btn primary" onClick={() => setExplanation(e => e ? { ...e, isOpen: false } : null)}>
+              阅毕
+            </button>
+          </div>
         }
       >
         <div style={{
@@ -591,12 +737,12 @@ export default function MindMapView() {
       <Modal
         isOpen={refineConfig?.isOpen || false}
         onClose={() => setRefineConfig(null)}
-        title="AI 节点发散设置"
+        title="AI 节点发散提取"
         footer={
           <>
             <button className="modal-btn secondary" onClick={() => setRefineConfig(null)}>取消</button>
-            <button className="modal-btn primary" style={{ background: 'var(--color-accent-gradient)', color: 'white', border: 'none' }} onClick={executeAiRefine}>
-              <Sparkles size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} /> 发散生长
+            <button className="modal-btn primary" style={{ background: 'var(--color-accent-gradient)', color: 'white', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', whiteSpace: 'nowrap' }} onClick={executeAiRefine}>
+              <Sparkles size={16} style={{ width: '16px', height: '16px', flex: '0 0 16px' }} /> <span>单层发散</span>
             </button>
           </>
         }
@@ -604,32 +750,127 @@ export default function MindMapView() {
         <div style={{ padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '14px', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>发散深度层级 (Depth)</span>
-              <span style={{ color: 'var(--color-accent)' }}>{refineConfig?.depth} 层</span>
+              <span>发散提取数量 (Max Nodes)</span>
+              <span style={{ color: refineConfig?.maxNodes === 0 ? 'var(--color-success, #22c55e)' : 'var(--color-accent)' }}>
+                {refineConfig?.maxNodes === 0 ? '自动 (Auto)' : `${refineConfig?.maxNodes} 个`}
+              </span>
             </label>
             <input 
               type="range" 
-              min="1" max="4" step="1"
-              value={refineConfig?.depth || 2}
-              onChange={(e) => setRefineConfig(prev => prev ? {...prev, depth: parseInt(e.target.value)} : null)}
-              style={{ accentColor: 'var(--color-accent)' }}
-            />
-            <span style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>控制 AI 向下属发散拓展的层数限制。</span>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '14px', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>单层最大节点数 (Max Nodes)</span>
-              <span style={{ color: 'var(--color-accent)' }}>{refineConfig?.maxNodes} 个</span>
-            </label>
-            <input 
-              type="range" 
-              min="2" max="15" step="1"
-              value={refineConfig?.maxNodes || 5}
+              min="0" max="15" step="1"
+              value={refineConfig?.maxNodes === undefined ? 0 : refineConfig?.maxNodes}
               onChange={(e) => setRefineConfig(prev => prev ? {...prev, maxNodes: parseInt(e.target.value)} : null)}
-              style={{ accentColor: 'var(--color-accent)' }}
+              style={{ accentColor: refineConfig?.maxNodes === 0 ? 'var(--color-success, #22c55e)' : 'var(--color-accent)' }}
             />
-            <span style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>控制每一次拆分的颗粒度，避免单层内容爆炸。</span>
+            <span style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
+              {refineConfig?.maxNodes === 0 
+                ? '由 AI 自动评估当前知识点，提取出最合适合理的分类数量。' 
+                : '控制本次要向下提取出多少个同级的直接细分子类/知识点。'}
+            </span>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Project AI Config Modal */}
+      <Modal
+        isOpen={isAiConfigOpen}
+        onClose={() => setIsAiConfigOpen(false)}
+        title="当前项目 AI 人设设定"
+        footer={
+          <>
+            <button className="modal-btn secondary" onClick={() => setIsAiConfigOpen(false)}>取消</button>
+            <button 
+              className="modal-btn primary" 
+              onClick={() => {
+                updateProjectAIConfig(currentProject.id, {
+                  persona: tempPersona,
+                  explainStyle: currentProject.aiConfig?.explainStyle || 'intermediate'
+                });
+                setIsAiConfigOpen(false);
+              }}
+            >
+              保存设定
+            </button>
+          </>
+        }
+      >
+        <div style={{ padding: '4px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                AI 专家人设描述 (Persona)
+              </label>
+              <button 
+                onClick={async () => {
+                  try {
+                    setIsPersonaGenerating(true);
+                    const config = await generateProjectPersona(currentProject.description, currentProject.title, tempPersona);
+                    setTempPersona(config.persona);
+                    updateProjectAIConfig(currentProject.id, config);
+                  } catch (e: any) {
+                    alert("智能生成失败: " + e.message);
+                  } finally {
+                    setIsPersonaGenerating(false);
+                  }
+                }}
+                disabled={isPersonaGenerating}
+                style={{ 
+                  background: 'rgba(168, 85, 247, 0.1)', 
+                  border: '1px solid rgba(168, 85, 247, 0.3)',
+                  color: '#a855f7',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                <Wand2 style={{ width: 14, height: 14, flexShrink: 0 }} className={isPersonaGenerating ? 'animate-spin' : ''} />
+                <span style={{ whiteSpace: 'nowrap' }}>{isPersonaGenerating ? '正在炼丹...' : 'AI 智能生成'}</span>
+              </button>
+            </div>
+            <textarea 
+              className="modal-textarea"
+              placeholder="例如：你是一位拥有 10 年经验的资深架构师，回答严谨且深入底层。"
+              value={tempPersona}
+              onChange={(e) => setTempPersona(e.target.value)}
+              style={{ minHeight: '100px', fontSize: '14px', width: '100%', boxSizing: 'border-box' }}
+            />
+            <span style={{ fontSize: '12px', color: 'var(--color-text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <HelpCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> 人设将深度影响 AI 的“解释概念”和“发散细化”的语气与专业程度。
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+              默认知识深度 (Explain Style)
+            </label>
+            <div style={{ display: 'flex', gap: '8px', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px' }}>
+              {(['beginner', 'intermediate', 'expert'] as const).map(style => (
+                <button
+                  key={style}
+                  onClick={() => updateProjectAIConfig(currentProject.id, {
+                    ...(currentProject.aiConfig || { persona: tempPersona }),
+                    explainStyle: style
+                  })}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    background: currentProject.aiConfig?.explainStyle === style ? 'var(--color-accent)' : 'transparent',
+                    color: currentProject.aiConfig?.explainStyle === style ? '#fff' : 'var(--color-text-secondary)',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {style === 'beginner' ? '入门' : style === 'intermediate' ? '进阶' : '专家'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </Modal>

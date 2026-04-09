@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Sparkles, Edit2, PlusCircle, Trash2, BookOpen, Network } from 'lucide-react';
+import { Sparkles, Edit2, PlusCircle, Trash2, BookOpen, Network, Eraser, RotateCw } from 'lucide-react';
 import './ContextMenu.css';
 
 export interface ContextMenuPosition {
@@ -10,7 +10,7 @@ export interface ContextMenuPosition {
 interface ContextMenuProps {
   position: ContextMenuPosition | null;
   onClose: () => void;
-  onAction: (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'ai_refine' | 'explain' | 'reorganize') => void;
+  onAction: (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize') => void;
 }
 
 export default function ContextMenu({ position, onClose, onAction }: ContextMenuProps) {
@@ -52,6 +52,10 @@ export default function ContextMenu({ position, onClose, onAction }: ContextMenu
           <BookOpen style={{ width: 16, height: 16, flexShrink: 0, color: '#3b82f6' }} /> 
           <span style={{ color: '#3b82f6', fontWeight: 500 }}>解释概念</span>
         </button>
+        <button className="context-menu-item" style={{ paddingLeft: '36px', fontSize: '12px', opacity: 0.8 }} onClick={() => { onAction('explain_regen'); onClose(); }}>
+          <RotateCw style={{ width: 12, height: 12, flexShrink: 0 }} /> 
+          <span>重新生成解释</span>
+        </button>
         <button className="context-menu-item highlight" style={{ background: 'rgba(234, 179, 8, 0.1)' }} onClick={() => { onAction('reorganize'); onClose(); }}>
           <Network style={{ width: 16, height: 16, flexShrink: 0, color: '#eab308' }} /> 
           <span style={{ color: '#eab308', fontWeight: 500 }}>重组子导图</span>
@@ -64,8 +68,11 @@ export default function ContextMenu({ position, onClose, onAction }: ContextMenu
           <PlusCircle style={{ width: 16, height: 16, flexShrink: 0 }} /> 插入子概念
         </button>
         <div className="context-menu-divider" />
+        <button className="context-menu-item danger" onClick={() => { onAction('delete_children'); onClose(); }}>
+          <Eraser style={{ width: 16, height: 16, flexShrink: 0 }} /> 清空所有子节点
+        </button>
         <button className="context-menu-item danger" onClick={() => { onAction('delete'); onClose(); }}>
-          <Trash2 style={{ width: 16, height: 16, flexShrink: 0 }} /> 删除节点
+          <Trash2 style={{ width: 16, height: 16, flexShrink: 0 }} /> 删除当前节点
         </button>
       </div>
     </div>

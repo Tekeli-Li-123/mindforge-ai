@@ -56,12 +56,32 @@ export function flattenNodes(node: MindMapNode): MindMapNode[] {
   return [node, ...node.children.flatMap(flattenNodes)];
 }
 
+/** 扁平化所有节点并包含完整路径，用于给 AI 提供精确的全局定位 */
+export function flattenNodesWithPaths(node: MindMapNode, parentPath: string = ''): { id: string; content: string; path: string }[] {
+  const currentPath = parentPath ? `${parentPath} > ${node.content}` : node.content;
+  let result = [{ id: node.id, content: node.content, path: currentPath }];
+  for (const child of node.children) {
+    result = [...result, ...flattenNodesWithPaths(child, currentPath)];
+  }
+  return result;
+}
+
 /**
  * 将 MindMapNode 转为 Markdown（用于 markmap 或 AI prompt）
  * @param forAI 如果为 true，则产出纯净的文本格式给 AI；否则注入用于 UI 的额外 DOM（如标签等）
  */
 export function nodeToMarkdown(node: MindMapNode, level: number = 1, forAI: boolean = false): string {
-  const prefix = level <= 4 ? '#'.repeat(level) + ' ' : '- ';
+  let prefix = '';
+  if (forAI) {
+    prefix = '#'.repeat(level) + ' ';
+  } else {
+    // 渲染 UI 时，除了根节点用 #，其下全部用完全缩进的无序列表，完美避开 H6 极限后的混合解析错误！
+    if (level === 1) {
+      prefix = '# ';
+    } else {
+      prefix = '  '.repeat(level - 2) + '- ';
+    }
+  }
   
   if (forAI) {
     let md = `${prefix}${node.content}\n`;
@@ -89,13 +109,13 @@ export function nodeToMarkdown(node: MindMapNode, level: number = 1, forAI: bool
  * 查找节点在导图中的完整路径 (提供上层的上下文知识结构)
  * 返回从根节点到目标节点的 content 数组
  */
-export function findNodePath(root: MindMapNode, targetId: string): string[] | null {
-  if (root.id === targetId) return [root.content];
+export function findNodePath(root: MindMapNode, targetId: string): MindMapNode[] | null {
+  if (root.id === targetId) return [root];
   
   for (const child of root.children) {
     const path = findNodePath(child, targetId);
     if (path) {
-      return [root.content, ...path];
+      return [root, ...path];
     }
   }
   return null;
@@ -106,6 +126,33 @@ export function findNodePath(root: MindMapNode, targetId: string): string[] | nu
  */
 import { Transformer } from 'markmap-lib';
 import type { INode } from 'markmap-common';
+
+/** 
+ * 直接将我们的导图数据转化为 Markmap 画布底层的 JSON AST
+ * 这彻底绕过了不可控且耗时的 Markdown 解析器
+ */
+export function convertToMarkmapINode(node: MindMapNode, depth: number = 1): INode {
+  const isRoot = depth === 1;
+  const rootClass = isRoot ? ' mindmap-root-node' : '';
+  let tagsHtml = '';
+  
+  if (node.tags && node.tags.includes('explained')) {
+    tagsHtml += `<span class="node-badge" title="已包含详细解释">📖</span>`;
+  }
+  
+  // 核心内容安全过滤：空字符串或纯空格会导致 D3 布局计算 NaN，必须补全
+  const safeContent = (node.content && node.content.trim()) ? node.content : ' ';
+  
+  return {
+    type: isRoot ? 'heading' : 'list_item',
+    depth: depth, 
+    content: `<div data-id="${node.id}" class="mindmap-node-box${rootClass}">${safeContent}${tagsHtml}</div>`,
+    children: (node.children || []).map(child => convertToMarkmapINode(child, depth + 1)),
+    payload: {
+      fold: !node.expanded ? 1 : 0
+    }
+  };
+}
 
 const transformer = new Transformer();
 

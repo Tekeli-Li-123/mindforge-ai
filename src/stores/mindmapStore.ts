@@ -101,9 +101,11 @@ interface MindMapStore {
   deleteNodes: (nodeIds: string[]) => void;
   appendChildren: (parentId: string, children: MindMapNode[]) => void;
   updateProjectRoot: (projectId: string, newRoot: MindMapNode) => void;
+  updateProjectAIConfig: (projectId: string, config: ProjectAIConfig) => void;
   selectNode: (nodeId: string | null) => void;
   toggleChat: () => void;
   addChatMessage: (message: ChatMessage) => void;
+  clearChat: () => void;
 }
 
 // ==========================================
@@ -233,7 +235,6 @@ export const useMindMapStore = create<MindMapStore>()(
             projects: state.projects.map((p) => p.id === updatedProject.id ? updatedProject : p),
           };
         }),
-
       updateProjectRoot: (projectId, newRoot) =>
         set((state) => {
           const updatedProjects = state.projects.map((p) => {
@@ -253,12 +254,32 @@ export const useMindMapStore = create<MindMapStore>()(
           };
         }),
 
+      updateProjectAIConfig: (projectId, config) =>
+        set((state) => {
+          const updatedProjects = state.projects.map((p) => {
+            if (p.id === projectId) {
+              return { ...p, aiConfig: config, updatedAt: Date.now() };
+            }
+            return p;
+          });
+
+          const updatedCurrent = state.currentProject?.id === projectId
+            ? updatedProjects.find(p => p.id === projectId) || null
+            : state.currentProject;
+
+          return {
+            projects: updatedProjects,
+            currentProject: updatedCurrent,
+          };
+        }),
+
       selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
 
       toggleChat: () => set((state) => ({ isChatOpen: !state.isChatOpen })),
 
       addChatMessage: (message) =>
         set((state) => ({ chatMessages: [...state.chatMessages, message] })),
+      clearChat: () => set({ chatMessages: [] }),
     }),
     {
       name: 'mindforge-projects',
