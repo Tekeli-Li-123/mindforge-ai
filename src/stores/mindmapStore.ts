@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { MindMapNode, MindMapProject, ChatMessage } from '../types';
+import type { MindMapNode, MindMapProject, ChatMessage, ProjectAIConfig, CognitiveState, CognitiveWeightConfig, ProjectCognitiveConfig } from '../types';
+import { INITIAL_COGNITIVE_STATE } from '../utils/bayesianEngine';
 
 // ==========================================
 // 示例数据
@@ -10,6 +11,10 @@ const sampleProject: MindMapProject = {
   description: '机器学习核心概念知识导图',
   createdAt: Date.now(),
   updatedAt: Date.now(),
+  cognitiveConfig: {
+    preset: 'balanced'
+  },
+  cognitiveStates: {},
   root: {
     id: 'root',
     content: '机器学习',
@@ -96,6 +101,7 @@ interface MindMapStore {
   addProject: (project: MindMapProject) => void;
   updateProject: (id: string, updates: Partial<MindMapProject>) => void;
   deleteProject: (id: string) => void;
+  duplicateProject: (id: string) => void;
   updateNode: (nodeId: string, updates: Partial<MindMapNode>) => void;
   deleteNode: (nodeId: string) => void;
   deleteNodes: (nodeIds: string[]) => void;
@@ -106,6 +112,14 @@ interface MindMapStore {
   toggleChat: () => void;
   addChatMessage: (message: ChatMessage) => void;
   clearChat: () => void;
+  /** 添加项目级长期记忆 */
+  addProjectMemory: (projectId: string, fact: string) => void;
+  /** 更新项目级长期记忆列表 */
+  updateProjectMemories: (projectId: string, memories: string[]) => void;
+  /** 更新认知评估配置 */
+  updateProjectCognitiveConfig: (projectId: string, config: ProjectCognitiveConfig) => void;
+  /** 更新节点认知状态 */
+  updateNodeCognitiveState: (nodeId: string, newState: CognitiveState) => void;
 }
 
 // ==========================================
@@ -173,6 +187,22 @@ export const useMindMapStore = create<MindMapStore>()(
         projects: state.projects.filter(p => p.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject
       })),
+
+      duplicateProject: (id) => set((state) => {
+        const projectToCopy = state.projects.find(p => p.id === id);
+        if (!projectToCopy) return state;
+
+        const newProject: MindMapProject = JSON.parse(JSON.stringify(projectToCopy));
+        newProject.id = `copy-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        newProject.title = `${newProject.title} (副本)`;
+        newProject.createdAt = Date.now();
+        newProject.updatedAt = Date.now();
+
+        return {
+          projects: [...state.projects, newProject],
+          currentProject: newProject
+        };
+      }),
 
       updateNode: (nodeId, updates) =>
         set((state) => {
@@ -280,6 +310,70 @@ export const useMindMapStore = create<MindMapStore>()(
       addChatMessage: (message) =>
         set((state) => ({ chatMessages: [...state.chatMessages, message] })),
       clearChat: () => set({ chatMessages: [] }),
+
+      addProjectMemory: (projectId, fact) => set((state) => {
+        const projects = state.projects.map(p => {
+          if (p.id === projectId) {
+            const oldMemories = p.memories || [];
+            return { ...p, memories: [...oldMemories, fact], updatedAt: Date.now() };
+          }
+          return p;
+        });
+        const currentProject = state.currentProject?.id === projectId 
+          ? projects.find(p => p.id === projectId) || null 
+          : state.currentProject;
+        return { projects, currentProject };
+      }),
+
+      updateProjectMemories: (projectId, memories) => set((state) => {
+        const projects = state.projects.map(p => {
+          if (p.id === projectId) {
+            return { ...p, memories, updatedAt: Date.now() };
+          }
+          return p;
+        });
+        const currentProject = state.currentProject?.id === projectId 
+          ? projects.find(p => p.id === projectId) || null 
+          : state.currentProject;
+        return { projects, currentProject };
+      }),
+
+      updateProjectCognitiveConfig: (projectId, config) => set((state) => {
+        const projects = state.projects.map(p => {
+          if (p.id === projectId) {
+            return { ...p, cognitiveConfig: config, updatedAt: Date.now() };
+          }
+          return p;
+        });
+        const currentProject = state.currentProject?.id === projectId 
+          ? projects.find(p => p.id === projectId) || null 
+          : state.currentProject;
+        return { projects, currentProject };
+      }),
+
+      updateNodeCognitiveState: (nodeId, newState) => set((state) => {
+        if (!state.currentProject) return state;
+        
+        const projectId = state.currentProject.id;
+        const cognitiveStates = { ...(state.currentProject.cognitiveStates || {}), [nodeId]: newState };
+        
+        // 计算新的掌握度 (0-1 范围)
+        const newMastery = newState.alpha / (newState.alpha + newState.beta);
+        
+        // 递归更新导图树中的节点掌握度
+        const newRoot = updateNodeInTree(state.currentProject.root, nodeId, { mastery: newMastery });
+        
+        const projects = state.projects.map(p => {
+          if (p.id === projectId) {
+            return { ...p, cognitiveStates, root: newRoot, updatedAt: Date.now() };
+          }
+          return p;
+        });
+        
+        const currentProject = { ...state.currentProject, cognitiveStates, root: newRoot, updatedAt: Date.now() };
+        
+        return { projects, currentProject };
+      }),
     }),
     {
       name: 'mindforge-projects',

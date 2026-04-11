@@ -8,6 +8,19 @@ export function decodeHTMLEntities(text: string): string {
   return textArea.value;
 }
 
+/** 通用文件下载函数 */
+export function downloadFile(content: string, fileName: string, contentType: string) {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /** 统计导图节点总数 */
 export function countNodes(node: MindMapNode): number {
   return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
@@ -33,13 +46,11 @@ export function generateId(): string {
   return `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** 根据掌握度获取颜色 */
-export function getMasteryColor(mastery: number): string {
-  if (mastery >= 0.8) return 'var(--color-mastery-full)';
-  if (mastery >= 0.6) return 'var(--color-mastery-high)';
-  if (mastery >= 0.3) return 'var(--color-mastery-medium)';
-  if (mastery > 0) return 'var(--color-mastery-low)';
-  return 'var(--color-mastery-none)';
+/** 根据掌握度获取颜色 (HSL 热力图) */
+export function getMasteryColor(mastery: number, alpha: number = 1): string {
+  // 掌握度 0 -> 红色 (0°), 掌握度 1 -> 绿色 (120°)
+  const hue = mastery * 120;
+  return `hsla(${hue}, 70%, 55%, ${alpha})`;
 }
 
 /** 根据掌握度获取标签 */
@@ -140,13 +151,22 @@ export function convertToMarkmapINode(node: MindMapNode, depth: number = 1): INo
     tagsHtml += `<span class="node-badge" title="已包含详细解释">📖</span>`;
   }
   
-  // 核心内容安全过滤：空字符串或纯空格会导致 D3 布局计算 NaN，必须补全
+  // 核心内容安全过滤
   const safeContent = (node.content && node.content.trim()) ? node.content : ' ';
   
+  // 热力图色彩与 CSS 变量注入
+  const progress = Math.round((node.mastery || 0) * 100);
+  const nodeColor = getMasteryColor(node.mastery || 0);
+  const nodeColorAlpha = getMasteryColor(node.mastery || 0, 0.4); // 进度条填充透明度更高
+  const style = isRoot ? '' : `style="--node-color: ${nodeColor}; --node-progress: ${progress}%; --node-glow-color: ${nodeColorAlpha};"`;
+
   return {
     type: isRoot ? 'heading' : 'list_item',
     depth: depth, 
-    content: `<div data-id="${node.id}" class="mindmap-node-box${rootClass}">${safeContent}${tagsHtml}</div>`,
+    content: `<div data-id="${node.id}" class="mindmap-node-box${rootClass}" ${style}>
+      <span class="node-content">${safeContent}</span>
+      ${tagsHtml}
+    </div>`,
     children: (node.children || []).map(child => convertToMarkmapINode(child, depth + 1)),
     payload: {
       fold: !node.expanded ? 1 : 0
@@ -190,4 +210,62 @@ export function parseMarkdownToMindMapNode(markdown: string): MindMapNode {
   }
 
   return mapNode(root);
+}
+
+/**
+ * 将项目导出为 JSON 字符串
+ */
+export function exportProjectToJSON(project: any): string {
+  // 深度克隆并移除可能的循环引用或不需要的临时状态
+  const data = JSON.parse(JSON.stringify(project));
+  return JSON.stringify(data, null, 2);
+}
+
+/**
+ * 解析并导入文件内容
+ */
+export async function parseImportedFile(file: File): Promise<any> {
+  const content = await file.text();
+  const nameSegments = file.name.split('.');
+  const ext = nameSegments.pop()?.toLowerCase();
+  
+  if (ext === 'json') {
+    try {
+      const data = JSON.parse(content);
+      // 支持导入单个项目或全量备份中的第一个项目
+      const projectData = Array.isArray(data.projects) ? data.projects[0] : data;
+      
+      if (!projectData || !projectData.root) {
+        throw new Error('JSON 格式无效：缺失导图数据');
+      }
+
+      // 强制克隆并重置 ID，确保导入为独立副本
+      const newProject = JSON.parse(JSON.stringify(projectData));
+      newProject.id = `imported-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      newProject.title = `${newProject.title} (导入)`;
+      newProject.createdAt = Date.now();
+      newProject.updatedAt = Date.now();
+      
+      return newProject;
+    } catch (e: any) {
+      throw new Error(e.message || 'JSON 解析失败');
+    }
+  } else if (ext === 'md' || ext === 'markdown') {
+    const rootNode = parseMarkdownToMindMapNode(content);
+    // 如果 Markdown 没有标题，使用文件名
+    if (!rootNode.content || rootNode.content === 'ROOT' || rootNode.content === ' ') {
+      rootNode.content = nameSegments.join('.');
+    }
+    
+    return {
+      id: `imported-${Date.now()}`,
+      title: rootNode.content,
+      description: '导入自 Markdown 文件',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      root: rootNode
+    };
+  } else {
+    throw new Error(`暂不支持 ${ext} 格式的导入`);
+  }
 }

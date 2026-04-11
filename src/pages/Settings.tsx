@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, BrainCircuit, Key, Globe, Database, Check } from 'lucide-react';
+import { Settings as SettingsIcon, BrainCircuit, Key, Globe, Database, Check, Download, Upload } from 'lucide-react';
 import { useSettingsStore, defaultAISettings, type AIProvider } from '../stores/settingsStore';
+import { useMindMapStore } from '../stores/mindmapStore';
+import { downloadFile } from '../utils/mindmapHelpers';
 import './Settings.css';
 
 const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
@@ -208,6 +210,81 @@ export default function Settings() {
           )}
           <button className="settings-btn secondary" onClick={handleReset}>取消更改</button>
           <button className="settings-btn primary" onClick={handleSave}>保存配置</button>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">
+          <Database size={20} className="gradient-text" />
+          数据管理 (Data Persistence)
+        </div>
+        
+        <div className="settings-form-group">
+          <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
+            备份您的所有导图项目及其 AI 配置。您可以将导出的 JSON 文件在另一台设备上导入。
+          </p>
+          
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button 
+              className="settings-btn secondary" 
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+              onClick={() => {
+                const { projects } = useMindMapStore.getState();
+                const data = JSON.stringify({
+                  projects,
+                  version: '1.0.0',
+                  exportedAt: Date.now()
+                }, null, 2);
+                downloadFile(data, `mindforge-backup-${new Date().toISOString().split('T')[0]}.json`, 'application/json');
+              }}
+            >
+              <Download size={16} /> 导出全量备份
+            </button>
+            
+            <label className="settings-btn secondary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
+              <Upload size={16} /> 导入 JSON 备份
+              <input 
+                type="file" 
+                accept=".json" 
+                style={{ display: 'none' }} 
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                    try {
+                      const content = event.target?.result as string;
+                      const data = JSON.parse(content);
+                      
+                      if (!data.projects || !Array.isArray(data.projects)) {
+                        throw new Error('无效的备份文件：缺失项目列表');
+                      }
+                      
+                      const confirm = window.confirm(`检测到 ${data.projects.length} 个导图项目。导入将合并到您当前的列表中，是否继续？`);
+                      if (confirm) {
+                        const { projects, addProject } = useMindMapStore.getState();
+                        // 简单的合并逻辑：如果 ID 重复则跳过，或者询问？这里先简单 add
+                        data.projects.forEach((newProj: any) => {
+                          const exists = projects.find(p => p.id === newProj.id);
+                          if (!exists) {
+                            addProject(newProj);
+                          } else {
+                            // 如果已存在，生成新 ID 导入
+                            addProject({ ...newProj, id: `imported-${Date.now()}-${Math.random().toString(36).slice(2,5)}` });
+                          }
+                        });
+                        alert('导入成功！');
+                      }
+                    } catch (err: any) {
+                      alert('恢复失败: ' + err.message);
+                    }
+                  };
+                  reader.readAsText(file);
+                }}
+              />
+            </label>
+          </div>
         </div>
       </div>
     </div>

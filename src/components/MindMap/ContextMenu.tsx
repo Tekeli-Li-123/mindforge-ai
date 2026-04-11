@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Sparkles, Edit2, PlusCircle, Trash2, BookOpen, Network, Eraser, RotateCw } from 'lucide-react';
+import { Sparkles, Edit2, PlusCircle, Trash2, BookOpen, Network, Eraser, RotateCw, Brain } from 'lucide-react';
 import './ContextMenu.css';
 
 export interface ContextMenuPosition {
@@ -10,7 +10,7 @@ export interface ContextMenuPosition {
 interface ContextMenuProps {
   position: ContextMenuPosition | null;
   onClose: () => void;
-  onAction: (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize') => void;
+  onAction: (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize' | 'assessment') => void;
 }
 
 export default function ContextMenu({ position, onClose, onAction }: ContextMenuProps) {
@@ -59,6 +59,10 @@ export default function ContextMenu({ position, onClose, onAction }: ContextMenu
         <button className="context-menu-item highlight" style={{ background: 'rgba(234, 179, 8, 0.1)' }} onClick={() => { onAction('reorganize'); onClose(); }}>
           <Network style={{ width: 16, height: 16, flexShrink: 0, color: '#eab308' }} /> 
           <span style={{ color: '#eab308', fontWeight: 500 }}>重组子导图</span>
+        </button>
+        <button className="context-menu-item highlight" style={{ background: 'rgba(124, 92, 252, 0.1)' }} onClick={() => { onAction('assessment'); onClose(); }}>
+          <Brain style={{ width: 16, height: 16, flexShrink: 0, color: '#7c5cfc' }} /> 
+          <span style={{ color: '#7c5cfc', fontWeight: 500 }}>开始知识诊断</span>
         </button>
         <div className="context-menu-divider" />
         <button className="context-menu-item" onClick={() => { onAction('edit'); onClose(); }}>

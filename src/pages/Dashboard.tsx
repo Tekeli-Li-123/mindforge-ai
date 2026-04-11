@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Map, GraduationCap, Sparkles, BookOpen, GitBranch, Clock, Brain } from 'lucide-react';
+import { Map, GraduationCap, Sparkles, BookOpen, GitBranch, Clock, Brain, Trash2, Copy, MoreVertical, Edit2 } from 'lucide-react';
 import { useMindMapStore } from '../stores/mindmapStore';
 import { countNodes, averageMastery, parseMarkdownToMindMapNode } from '../utils/mindmapHelpers';
 import { generateMindMap } from '../services/aiService';
@@ -9,7 +9,7 @@ import Modal from '../components/common/Modal';
 import './Dashboard.css';
 
 export default function Dashboard() {
-  const { projects, addProject, setCurrentProject, updateProjectRoot } = useMindMapStore();
+  const { projects, addProject, setCurrentProject, updateProjectRoot, deleteProject, duplicateProject, updateProject } = useMindMapStore();
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectParams, setNewProjectParams] = useState({
@@ -169,6 +169,44 @@ export default function Dashboard() {
             <div className="project-card-meta">
               <span><GitBranch size={12} /> {countNodes(project.root)} 节点</span>
               <span><Clock size={12} /> {new Date(project.updatedAt).toLocaleDateString('zh-CN')}</span>
+            </div>
+            
+            <div className="project-card-actions">
+              <button 
+                className="project-action-btn" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newTitle = window.prompt('请输入新的导图标题：', project.title);
+                  if (newTitle !== null && newTitle.trim() !== '') {
+                    updateProject(project.id, { title: newTitle.trim() });
+                  }
+                }}
+                title="重命名项目"
+              >
+                <Edit2 size={16} />
+              </button>
+              <button 
+                className="project-action-btn" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  duplicateProject(project.id);
+                }}
+                title="创建副本"
+              >
+                <Copy size={16} />
+              </button>
+              <button 
+                className="project-action-btn delete" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`确定要彻底删除“${project.title}”及其所有学习进度吗？`)) {
+                    deleteProject(project.id);
+                  }
+                }}
+                title="删除项目"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           </div>
         ))}

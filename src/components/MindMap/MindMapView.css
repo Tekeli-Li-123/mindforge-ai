@@ -2,11 +2,12 @@
   width: 100%;
   height: 100%;
   position: relative;
-  background:
-    radial-gradient(circle at 50% 50%, var(--color-bg-tertiary) 0%, var(--color-bg-primary) 70%);
+  background: 
+    radial-gradient(circle at 50% 50%, #16162a 0%, #0a0a0f 100%);
+  background-attachment: fixed;
 }
 
-.mindmap-container svg {
+#mindmap-svg {
   width: 100%;
   height: 100%;
 }
@@ -14,17 +15,7 @@
 /* Removed external node text styles to avoid duplication */
 
 
-/* Branch link lines */
-.markmap-link {
-  stroke-width: 2;
-  opacity: 0.7;
-}
-
-/* Circle markers on nodes */
-.markmap-node circle {
-  stroke-width: 2;
-  r: 5;
-}
+/* Branch link and bubble styles are now managed globally in index.css for consistency */
 
 .mindmap-toolbar {
   position: absolute;
@@ -90,4 +81,61 @@
   font-size: var(--font-size-sm);
   text-align: center;
   max-width: 280px;
+}
+
+.mindmap-export-wrapper {
+  position: relative;
+  display: flex;
+}
+
+.mindmap-export-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 12px;
+  min-width: 220px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
+  animation: slideUp 0.15s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.export-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.export-menu-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+
+.export-menu-item svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.export-menu-item:hover svg {
+  color: var(--color-accent);
 }

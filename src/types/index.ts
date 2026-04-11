@@ -2,6 +2,8 @@
 // MindForge AI — Type Definitions
 // ==========================================
 
+export const TYPE_SYSTEM_VERSION = '1.1.0';
+
 /** 项目级 AI 人设配置 */
 export interface ProjectAIConfig {
   /** AI 扮演的角色描述，例如 "你是一位硅谷顶尖的 AI 基础设施架构师" */
@@ -14,13 +16,75 @@ export interface ProjectAIConfig {
   customRefinePrompt?: string;
 }
 
+/** 贝叶斯评估预设类型 */
+export type CognitivePreset = 'balanced' | 'theoretical' | 'practical' | 'exam';
+
+/** 考核难度级别 */
+export type QuizDifficulty = 'easy' | 'medium' | 'hard';
+
+/** 认知评估权重配置 */
+export interface CognitiveWeightConfig {
+  recall: number;
+  comprehension: number;
+  application: number;
+  analysis: number;
+}
+
+/** LLM 提取的证据格式 */
+export interface LLMEvidence {
+  /** 能否准确回忆核心定义/事实 (0-1) */
+  recall: number;
+  /** 能否用自己的话解释清楚 (0-1) */
+  comprehension: number;
+  /** 能否举例或关联实际场景 (0-1) */
+  application: number;
+  /** 能否辨析易混点或批判性思考 (0-1) */
+  analysis: number;
+  
+  /** LLM 给出的定性评估反馈 */
+  feedback: string;
+  /** 错误类型 */
+  errorType: 'factual' | 'conceptual' | 'logical' | 'none';
+  /** 针对性的学习建议 */
+  suggestion: string;
+}
+
+/** 单次证据记录 */
+export interface EvidenceRecord {
+  timestamp: number;
+  question: string;
+  userAnswer: string;
+  llmEvidence: LLMEvidence;
+  masteryBefore: number;
+  masteryAfter: number;
+}
+
+/** 节点认知状态（贝叶斯 Beta 分布参数） */
+export interface CognitiveState {
+  /** 成功权重累加值 */
+  alpha: number;
+  /** 失败权重累加值 */
+  beta: number;
+  /** 最后更新时间 */
+  lastUpdate: number;
+  /** 历史证据记录 */
+  evidenceHistory: EvidenceRecord[];
+}
+
+/** 导图项目级认知配置 */
+export interface ProjectCognitiveConfig {
+  preset: CognitivePreset;
+  customWeights?: CognitiveWeightConfig;
+  defaultDifficulty?: QuizDifficulty;
+}
+
 /** 思维导图节点 */
 export interface MindMapNode {
   id: string;
   content: string;
   children: MindMapNode[];
   depth: number;
-  /** 掌握度 0-1 */
+  /** 掌握度 0-1 (映射自认知状态的期望值) */
   mastery: number;
   /** 是否已展开（由 AI 细化过） */
   expanded: boolean;
@@ -28,7 +92,7 @@ export interface MindMapNode {
   note?: string;
   /** 缓存保存的词条解释 */
   explanation?: string;
-  /** 预留的标签记录数组，比如标记已解释或被重点标注 */
+  /** 预留的标签记录数组 */
   tags?: string[];
 }
 
@@ -39,8 +103,14 @@ export interface MindMapProject {
   description: string;
   root: MindMapNode;
   aiConfig?: ProjectAIConfig;
+  /** 认知评估配置 */
+  cognitiveConfig?: ProjectCognitiveConfig;
+  /** 节点 ID 到认知状态的映射 */
+  cognitiveStates?: Record<string, CognitiveState>;
   createdAt: number;
   updatedAt: number;
+  /** 长期记忆 */
+  memories?: string[];
 }
 
 /** 聊天消息 */
@@ -49,15 +119,17 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  isCompacted?: boolean;
 }
 
 /** 考核题目 */
 export interface QuizQuestion {
   id: string;
-  type: 'choice' | 'trueFalse' | 'fillBlank';
+  type: 'choice' | 'trueFalse' | 'fillBlank' | 'openEnded';
   question: string;
   options?: string[];
-  correctAnswer: string;
+  correctAnswer?: string;
+  referenceAnswer?: string;
   explanation: string;
   relatedNodeId: string;
   difficulty: 'easy' | 'medium' | 'hard';
@@ -69,6 +141,7 @@ export interface QuizResult {
   userAnswer: string;
   isCorrect: boolean;
   timestamp: number;
+  evidence?: LLMEvidence;
 }
 
 /** 页面路由 */

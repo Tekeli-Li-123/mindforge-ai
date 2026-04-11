@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Markmap } from 'markmap-view';
 import { Transformer } from 'markmap-lib';
-import { ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, Map, Sparkles, Check, X, Brain, Wand2, HelpCircle, MessageSquare } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, Map, Sparkles, Check, X, Brain, Wand2, HelpCircle, MessageSquare, Download, FileText, FileJson, Image as ImageIcon, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import Modal from '../common/Modal';
 import { useMindMapStore } from '../../stores/mindmapStore';
 import { useSettingsStore, defaultAISettings } from '../../stores/settingsStore';
 import type { MindMapNode } from '../../types';
-import { findNodePath, generateId, parseMarkdownToMindMapNode, decodeHTMLEntities, convertToMarkmapINode } from '../../utils/mindmapHelpers';
+import { findNodePath, generateId, parseMarkdownToMindMapNode, decodeHTMLEntities, convertToMarkmapINode, downloadFile, nodeToMarkdown, exportProjectToJSON } from '../../utils/mindmapHelpers';
 import ContextMenu, { type ContextMenuPosition } from './ContextMenu';
+import AssessmentModal from '../Assessment/AssessmentModal';
 import { generateMindMap, explainConcept, reorganizeMindMap, generateProjectPersona } from '../../services/aiService';
 import './MindMapView.css';
 
@@ -78,10 +79,23 @@ export default function MindMapView() {
     maxNodes: number;
   } | null>(null);
 
-  // Project AI Config Modal State
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [tempPersona, setTempPersona] = useState('');
   const [isPersonaGenerating, setIsPersonaGenerating] = useState(false);
+
+  // Assessment Modal State
+  const [assessmentState, setAssessmentState] = useState<{
+    isOpen: boolean;
+    node: MindMapNode | null;
+    path: string;
+  }>({
+    isOpen: false,
+    node: null,
+    path: ''
+  });
+
+  // Export Menu State
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   // Track rendering state
   const isRendering = useRef(false);
@@ -139,8 +153,8 @@ export default function MindMapView() {
     if (!svgRef.current) return;
     
     const observer = new ResizeObserver(() => {
-      if (mmRef.current) {
-        const { width, height } = svgRef.current!.getBoundingClientRect();
+      if (mmRef.current && svgRef.current) {
+        const { width, height } = svgRef.current.getBoundingClientRect();
         if (width > 0 && height > 0) {
           mmRef.current.fit();
         }
@@ -195,6 +209,114 @@ export default function MindMapView() {
 
   const handleZoomOut = () => {
     mmRef.current?.rescale(0.7);
+  };
+
+  const handleExportMarkdown = () => {
+    if (!currentProject) return;
+    const md = nodeToMarkdown(currentProject.root);
+    downloadFile(md, `${currentProject.title || 'mindmap'}.md`, 'text/markdown');
+    setIsExportMenuOpen(false);
+  };
+
+  const handleExportJSON = () => {
+    if (!currentProject) return;
+    const json = exportProjectToJSON(currentProject);
+    downloadFile(json, `${currentProject.title || 'mindmap'}.json`, 'application/json');
+    setIsExportMenuOpen(false);
+  };
+
+  const handleExportImage = async () => {
+    if (!svgRef.current) return;
+    
+    // 立即关闭菜单，防止重复点击
+    setIsExportMenuOpen(false);
+
+    try {
+      const svg = svgRef.current;
+      
+      // 捕获当前视图尺寸
+      const bbox = svg.getBBox();
+      const padding = 40;
+      const width = bbox.width + padding * 2;
+      const height = bbox.height + padding * 2;
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const scale = 2; // 高清导出
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      ctx.scale(scale, scale);
+
+      // 1. 绘制背景
+      ctx.fillStyle = '#0a0a0f'; 
+      ctx.fillRect(0, 0, width, height);
+
+      // 2. 克隆并处理 SVG 使得其自包含且符合 XML 规范
+      const clonedSvg = svg.cloneNode(true) as SVGSVGElement;
+      clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      clonedSvg.setAttribute('width', width.toString());
+      clonedSvg.setAttribute('height', height.toString());
+      // 设置视图框以包含所有内容
+      clonedSvg.setAttribute('viewBox', `${bbox.x - padding} ${bbox.y - padding} ${width} ${height}`);
+
+      // 注入必要的全局 CSS 变量和基础样式，否则 foreignObject 里的 HTML 会丢失样式
+      const styleElement = document.createElement('style');
+      styleElement.textContent = `
+        .mindmap-node-box {
+          background: #1a1a28;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 8px;
+          padding: 6px 12px;
+          color: #f0f0f5;
+          font-family: sans-serif;
+          font-size: 14px;
+          font-weight: 500;
+          display: inline-block;
+        }
+        .mindmap-root-node {
+          background: linear-gradient(135deg, #7c5cfc 0%, #5ca0fc 100%);
+          color: white;
+          font-weight: bold;
+        }
+        .markmap-link { stroke: #7c5cfc; stroke-width: 2px; fill: none; opacity: 0.6; }
+        .markmap-node circle { fill: #7c5cfc; stroke: #fff; stroke-width: 1px; }
+        .node-badge { display: none; } /* 导出图暂时隐藏图标 */
+      `;
+      clonedSvg.insertBefore(styleElement, clonedSvg.firstChild);
+
+      const svgData = new XMLSerializer().serializeToString(clonedSvg);
+      // 使用 Base64 编码以降低“画布污染”风险，处理中文字符需用 unescape(encodeURIComponent)
+      const base64Svg = window.btoa(unescape(encodeURIComponent(svgData)));
+      const img = new Image();
+
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        try {
+          // toDataURL 失败通常是因为 foreignObject 包含跨域资源或浏览器严格限制
+          const pngUrl = canvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          link.href = pngUrl;
+          link.download = `${currentProject?.title || 'mindmap'}.png`;
+          link.click();
+        } catch (e) {
+          console.error('Canvas export security error:', e);
+          alert('导出失败：浏览器出于安全限制禁止了包含 HTML 内容的画布导出。这在 Chrome/Edge 的某些版本中很常见。您可以尝试使用 Markdown 导出或直接使用浏览器截图。');
+        }
+      };
+
+      img.onerror = (e) => {
+        console.error('SVG Image loading error (possibly invalid XML):', e);
+        alert('图片渲染失败。这通常是由于导图内容包含无法解析的特殊字符，请检查节点文本。');
+      };
+
+      img.src = 'data:image/svg+xml;base64,' + base64Svg;
+    } catch (err: any) {
+      console.error('Export critical error:', err);
+      alert('导出发生错误: ' + err.message);
+    }
   };
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -364,7 +486,7 @@ export default function MindMapView() {
     setInlineEditor(null);
   };
 
-  const handleAction = async (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize') => {
+  const handleAction = async (action: 'edit' | 'add_child' | 'add_sibling' | 'delete' | 'delete_children' | 'ai_refine' | 'explain' | 'explain_regen' | 'reorganize' | 'assessment') => {
     if (!activeNodeId || !currentProject) return;
 
     const targetNodeIds = selectedNodes.has(activeNodeId) && selectedNodes.size > 1 
@@ -475,6 +597,15 @@ export default function MindMapView() {
         }
       }
       setIsAiLoading(false);
+    } else if (action === 'assessment') {
+      const path = findNodePath(currentProject.root, activeNodeId);
+      if (path) {
+        setAssessmentState({
+          isOpen: true,
+          node: path[path.length - 1],
+          path: path.map(n => n.content).join(' > ')
+        });
+      }
     }
   };
 
@@ -489,7 +620,7 @@ export default function MindMapView() {
     for (const nId of nodeIds) {
       const path = findNodePath(currentProject.root, nId);
       if (!path) continue;
-      const targetName = decodeHTMLEntities(path[path.length - 1]);
+      const targetName = decodeHTMLEntities(path[path.length - 1].content);
       originalNames[nId] = targetName;
       updateNode(nId, { content: targetName + ' (✨ 细化中...)' });
     }
@@ -498,8 +629,8 @@ export default function MindMapView() {
       const path = findNodePath(currentProject.root, nId);
       if (!path) continue;
       
-      const targetName = originalNames[nId] || decodeHTMLEntities(path[path.length - 1]);
-      const contextString = decodeHTMLEntities(path.join(' > '));
+      const targetName = originalNames[nId] || decodeHTMLEntities(path[path.length - 1].content);
+      const contextString = decodeHTMLEntities(path.map(n => n.content).join(' > '));
       
       try {
         const refinePrompt = useSettingsStore.getState().aiSettings.refinePrompt || defaultAISettings.refinePrompt;
@@ -609,6 +740,34 @@ export default function MindMapView() {
         >
           <Brain size={18} />
         </button>
+
+        <div className="mindmap-export-wrapper">
+          <button 
+            className={`mindmap-toolbar-btn ${isExportMenuOpen ? 'active' : ''}`}
+            onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+            title="导出导图"
+          >
+            <Download size={18} />
+          </button>
+          
+          {isExportMenuOpen && (
+            <div className="mindmap-export-menu glass animate-fade-in">
+              <div className="export-menu-item" onClick={handleExportMarkdown}>
+                <FileText size={16} />
+                <span>导出为 Markdown (.md)</span>
+              </div>
+              <div className="export-menu-item" onClick={handleExportJSON}>
+                <FileJson size={16} />
+                <span>导出为 JSON (.json)</span>
+              </div>
+              <div className="export-menu-item" onClick={handleExportImage}>
+                <ImageIcon size={16} />
+                <span>导出为图片 (.png)</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         <button 
           className={`mindmap-toolbar-btn ${isChatOpen ? 'active' : ''}`} 
           style={{ color: isChatOpen ? 'var(--color-accent)' : 'inherit' }}
@@ -625,6 +784,16 @@ export default function MindMapView() {
         onClose={() => setContextMenuPos(null)}
         onAction={handleAction}
       />
+
+      {/* Assessment Modal */}
+      {assessmentState.node && (
+        <AssessmentModal
+          isOpen={assessmentState.isOpen}
+          onClose={() => setAssessmentState({ ...assessmentState, isOpen: false })}
+          node={assessmentState.node}
+          contextPath={assessmentState.path}
+        />
+      )}
 
       {/* Marquee UI */}
       {marquee?.isDrawing && (

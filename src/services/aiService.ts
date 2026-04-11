@@ -93,7 +93,7 @@ ${request.description ? `学习目标/要求描述: ${request.description}` : ''
   }
 }
 
-async function fetchFromAI(
+export async function fetchFromAI(
   systemMessage: string, 
   userMessage: string
 ): Promise<string> {
@@ -232,13 +232,7 @@ export async function chatWithAI(
   // 构建系统提示词
   let systemMsg = `你是一个集成在思维导图工具 (MindForge AI) 中的学习助理。
 你不仅能通过文本回答问题，还能直接命令工具修改导图。
-
-### 协作编辑协议 (Collaborative Protocol)
-当且仅当你认为需要修改导图结构时，请在回复的末尾（或合适位置）附加以下指令标签。这些标签对用户不可见，但会被系统执行：
-1. 添加节点: [[ADD:parentId:content]] (content 建议简短)
-2. 删除节点: [[DELETE:nodeId]]
-3. 重命名节点: [[RENAME:nodeId:newContent]]
-4. 存入解释: [[SAVE_EXPLAIN:nodeId:content]] (当用户询问概念或要求记录解释时使用)
+${skillRegistry.getSkillsPrompt()}
 
 ### 当前导图全量索引 (Global Context)
 以下是当前导图中所有节点的路径信息。请根据全路径（Path）精准选择你想要操作的 ID，严禁张冠李戴：

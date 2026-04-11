@@ -13,28 +13,38 @@ MindForge AI 是一款深度集成大语言模型（LLM）的思维导图工具�
 
 ## ✨ 核心特性
 
-### 1. 🤖 协作式 AI 对话 (Collaborative Chat)
-- **对话即编辑**：直接对 AI 说“在下面加个总结”或“重组这些分支”，AI 会识别指令并实时修改导图结构。
-- **操作审计日志**：AI 执行的所有自动变更均会有系统记录，确保编辑过程透明、可追溯。
-- **上下文感知**：AI 默认感知您当前选中的节点及其完整的知识路径，提供极具针对性的解答。
+### 1. 🤖 协作式 AI 技能系统 (Modular Skill System)
+- **指令分发机制**：插件化的技能架构，AI 可自动调用 `ADD_NODE`、`DELETE_NODE`、`RENAME_NODE` 等技能实时操作导图。
+- **知识沉淀 (SAVE_EXPLAIN)**：AI 可将深度的概念解释直接同步到节点的元数据中，点击节点即可查看。
+- **动态掌握度 (UPDATE_MASTERY)**：内置认知评估技能，根据对话表现实时计算并更新用户对每个知识点的掌握百分比。
 
-### 2. 📖 深度概念细化 (Deep Refinement)
-- **一键解释**：针对任何节点，一键生成多维度的专业解释，并可自动同步至节点书签。
-- **智能发散**：通过 AI 自动为一个核心概念发散出系统的子节点结构。
-- **个性化风格**：支持配置“项目人设”，无论是“通俗易懂的启蒙老师”还是“严谨的数据专家”，随心切换。
+### 2. 🧠 智能记忆引擎 (Intelligent Memory Engine)
+- **对话压缩技术**：内置启发式 Token 估算与自动总结机制，有效应对长对话下的上下文窗口限制。
+- **核心见解提取 (MEMORY_FLUSH)**：支持手动或自动触发的记忆整理，从杂乱的对话中提取事实 (Facts) 并转为长期记忆。
 
-### 3. 🎨 极致的交互体验 (Premium UX)
-- **高性能渲染**：基于 D3.js 和 Markmap 的矢量化导图引擎，支持海量节点平滑缩放。
+### 3. 📖 深度概念细化与重组
+- **一键细化 (AI Refine)**：基于递归路径感知，自动为核心概念发散出分一层的科学分类。
+- **智能重组 (Reorganize)**：一键调用 AI 重新梳理混乱的分支结构，优化知识层级。
+- **个性化人设**：支持项目级 AI Persona 配置，让 AI 以特定身份辅助学习。
+
+### 4. 🎯 自适应 AI 知识诊断系统 (Adaptive Assessment)
+- **多维度测评会话**：支持“问答、单选、判断”三种题型组合，通过顺序会话模式全方位检验知识点掌握情况。
+- **自定义 AI 考官 (Persona Input)**：支持通过 AI 指令定义考官人设（如：面试官模式、通俗易懂模式），并提供 AI 指令优化（Magic Sparkle）。
+- **贝叶斯认知更新**：集成贝叶斯推理引擎，根据测验表现精确演算并更新知识点的掌握度分布。
+- **资源消费透明度**：内置 Token 消耗预警与 AI 注意力衰减提示，确保高质量、高效率的评估。
+
+### 5. 🎨 极致的交互体验 (Premium UX)
+- **高性能渲染**：基于 D3.js 和 Markmap 的矢量化导图引擎，支持海量节点平滑缩放与热力图配色。
+- **节点掌握度可视化**：节点背景进度条从红色（0%）平滑过渡到绿色（100%），即时反馈学习进度。
 - **暗黑美学**：精心设计的暗色主题，配合毛玻璃（Glassmorphism）与流光动效，打造沉浸式学习心流。
-- **多项目管理**：支持 LocalStorage 持久化存储，多个学习项目无缝切换。
 
 ## 🛠️ 技术栈
 
 - **Frontend**: React 18 / TypeScript / Vite
+- **LLM Logic**: Bayesian Inference Engine / Custom Prompt Engineering
 - **Styling**: Vanilla CSS (Modern CSS Variables + Flex/Grid/Animations)
 - **State**: Zustand (Atomic State Management)
 - **Rendering**: Markmap / D3.js (SVG-based)
-- **Markdown**: React Markdown
 - **Icons**: Lucide React
 - **LLM API**: OpenAI-Compatible API Layer
 

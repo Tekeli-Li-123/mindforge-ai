@@ -10,6 +10,10 @@ import {
   Brain,
   FileText,
   ChevronDown,
+  MoreVertical,
+  Edit2,
+  Copy,
+  Trash2,
 } from 'lucide-react';
 import { useMindMapStore } from '../../stores/mindmapStore';
 import './Sidebar.css';
@@ -30,10 +34,11 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
-  const { projects, currentProject, setCurrentProject } = useMindMapStore();
+  const { projects, currentProject, setCurrentProject, deleteProject, duplicateProject, updateProject } = useMindMapStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   // 判定当前是否在一个项目的编辑页
   const isEditorActive = location.pathname === '/editor';
@@ -103,18 +108,61 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 projects.map(proj => {
                   const isActiveProj = isEditorActive && currentProject?.id === proj.id;
                   return (
-                    <button
-                      key={proj.id}
-                      className={`sidebar-project-item ${isActiveProj ? 'active' : ''}`}
-                      onClick={() => {
-                        setCurrentProject(proj);
-                        navigate('/editor');
-                      }}
-                      title={proj.title}
-                    >
-                      <FileText size={14} />
-                      <span className="sidebar-project-name">{proj.title}</span>
-                    </button>
+                    <div key={proj.id} className="sidebar-project-item-container">
+                      <button
+                        className={`sidebar-project-item ${isActiveProj ? 'active' : ''}`}
+                        onClick={() => {
+                          setCurrentProject(proj);
+                          navigate('/editor');
+                        }}
+                        title={proj.title}
+                      >
+                        <FileText size={14} />
+                        <span className="sidebar-project-name">{proj.title}</span>
+                      </button>
+                      
+                      <button 
+                        className={`sidebar-project-more-btn ${activeMenuId === proj.id ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuId(activeMenuId === proj.id ? null : proj.id);
+                        }}
+                      >
+                        <MoreVertical size={14} />
+                      </button>
+
+                      {activeMenuId === proj.id && (
+                        <div className="sidebar-project-dropdown glass animate-fade-in">
+                          <div className="dropdown-item" onClick={(e) => {
+                            e.stopPropagation();
+                            const newTitle = window.prompt('设个新名字吧：', proj.title);
+                            if (newTitle) {
+                               updateProject(proj.id, { title: newTitle });
+                            }
+                            setActiveMenuId(null);
+                          }}>
+                            <Edit2 size={13} /> 重命名
+                          </div>
+                          <div className="dropdown-item" onClick={(e) => {
+                            e.stopPropagation();
+                            duplicateProject(proj.id);
+                            setActiveMenuId(null);
+                          }}>
+                            <Copy size={13} /> 复制
+                          </div>
+                          <div className="dropdown-item delete" onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`确定要删除“${proj.title}”及其学习记录吗？`)) {
+                              deleteProject(proj.id);
+                              if (isActiveProj) navigate('/');
+                            }
+                            setActiveMenuId(null);
+                          }}>
+                            <Trash2 size={13} /> 删除
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}

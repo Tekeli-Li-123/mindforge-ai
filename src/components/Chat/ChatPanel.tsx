@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, Bot, User, Sparkles, Trash2, Brain } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import type { ChatMessage } from '../../types';
 import { useMindMapStore } from '../../stores/mindmapStore';
 import { chatWithAI } from '../../services/aiService';
-import { findNodePath, decodeHTMLEntities, generateId, flattenNodes } from '../../utils/mindmapHelpers';
+import { skillRegistry } from '../../services/skills';
+import { memoryService } from '../../services/memoryService';
+import { findNodePath, decodeHTMLEntities, flattenNodes } from '../../utils/mindmapHelpers';
 import './ChatPanel.css';
 
 const suggestions = [
@@ -70,20 +73,45 @@ export default function ChatPanel() {
       const history = [...chatMessages, userMessage];
       const rawAiResponse = await chatWithAI(history, contextData?.node, contextData?.pathString);
       
-      // 处理 AI 指令
-      const { cleanContent, actionLogs } = processAiCommands(rawAiResponse);
+      // 处理 AI 指令 - 接入统一技能引擎
+      const { cleanContent, actionLogs } = await processAiCommands(rawAiResponse);
       
       if (actionLogs.length > 0) {
         setActionLabel(`✨ AI 已同步执行了 ${actionLogs.length} 项导图变更`);
         setTimeout(() => setActionLabel(null), 3000);
       }
 
-      addChatMessage({
+      const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant' as const,
         content: cleanContent,
         timestamp: Date.now(),
-      });
+      };
+
+      // 更新消息列表
+      const updatedHistory = [...history, assistantMessage];
+      
+      // --- 自动记忆管理：历史记录压缩逻辑 ---
+      const COMPACTION_THRESHOLD = 15;
+      if (updatedHistory.length >= COMPACTION_THRESHOLD) {
+        console.log('📦 [MemoryEngine] 触发对话自动压缩...');
+        const summary = await memoryService.summarizeHistory(updatedHistory);
+        const compactedMessage: ChatMessage = {
+          id: `msg-compact-${Date.now()}`,
+          role: 'system' as any,
+          content: `🕒 对话内容过多，已自动整理摘要：${summary}`,
+          timestamp: Date.now(),
+          isCompacted: true
+        };
+        // 保留最后 2 条新消息作为即时上下文，合并之前的为摘要
+        const newHistory = [compactedMessage, ...updatedHistory.slice(-2)];
+        
+        // 我们直接清空并重置消息列表
+        clearChat();
+        newHistory.forEach(msg => addChatMessage(msg));
+      } else {
+        addChatMessage(assistantMessage);
+      }
 
       // 批量插入系统操作记录
       actionLogs.forEach((log, idx) => {
@@ -109,76 +137,22 @@ export default function ChatPanel() {
   /**
    * 解析并执行 AI 指令标签
    */
-  const processAiCommands = (content: string) => {
-    let cleanContent = content;
-    const actionLogs: string[] = [];
-
+  const processAiCommands = async (content: string) => {
     const allNodes = currentProject ? flattenNodes(currentProject.root) : [];
 
-    // 1. 处理 ADD 指令
-    const addRegex = /\[\[ADD:([^:]+):([^\]]+)\]\]/g;
-    let addMatch;
-    while ((addMatch = addRegex.exec(content)) !== null) {
-      const [, parentId, nodeContent] = addMatch;
-      const parentNode = allNodes.find(n => n.id === parentId);
-      
-      appendChildren(parentId, [{
-        id: generateId(),
-        content: nodeContent.trim(),
-        children: [],
-        depth: 0,
-        mastery: 0,
-        expanded: true
-      }]);
-      
-      actionLogs.push(`在节点“${parentNode?.content || parentId}”下添加了“${nodeContent.trim()}”`);
-      cleanContent = cleanContent.replace(addMatch[0], '');
-    }
-
-    // 2. 处理 DELETE 指令
-    const deleteRegex = /\[\[DELETE:([^\]]+)\]\]/g;
-    let deleteMatch;
-    while ((deleteMatch = deleteRegex.exec(content)) !== null) {
-      const [, nodeId] = deleteMatch;
-      const targetNode = allNodes.find(n => n.id === nodeId);
-      
-      deleteNodes([nodeId]);
-      actionLogs.push(`删除了节点“${targetNode?.content || nodeId}”`);
-      cleanContent = cleanContent.replace(deleteMatch[0], '');
-    }
-
-    // 3. 处理 RENAME 指令
-    const renameRegex = /\[\[RENAME:([^:]+):([^\]]+)\]\]/g;
-    let renameMatch;
-    while ((renameMatch = renameRegex.exec(content)) !== null) {
-      const [, nodeId, newContent] = renameMatch;
-      const targetNode = allNodes.find(n => n.id === nodeId);
-      
-      updateNode(nodeId, { content: newContent.trim() });
-      actionLogs.push(`将节点“${targetNode?.content || nodeId}”重命名为“${newContent.trim()}”`);
-      cleanContent = cleanContent.replace(renameMatch[0], '');
-    }
-
-    // 4. 处理 SAVE_EXPLAIN 指令
-    const saveRegex = /\[\[SAVE_EXPLAIN:([^:]+):([^\]]+)\]\]/g;
-    let saveMatch;
-    while ((saveMatch = saveRegex.exec(content)) !== null) {
-      const [, nodeId, explainContent] = saveMatch;
-      const targetNode = allNodes.find(n => n.id === nodeId);
-      
-      if (targetNode) {
-        const oldTags = targetNode.tags || [];
-        const newTags = oldTags.includes('explained') ? oldTags : [...oldTags, 'explained'];
-        updateNode(nodeId, { 
-          explanation: explainContent.trim(), 
-          tags: newTags 
-        });
-        actionLogs.push(`已将详细解释同步至节点“${targetNode.content}”`);
+    // 统一分发至技能注册中心执行
+    return await skillRegistry.dispatch(content, {
+      allNodes,
+      appendChildren,
+      deleteNodes,
+      updateNode,
+      // 扩展上下文提供给 MEMORY_FLUSH 等技能使用
+      messages: chatMessages,
+      projectId: currentProject?.id,
+      addProjectMemory: (pid: string, fact: string) => {
+        useMindMapStore.getState().addProjectMemory(pid, fact);
       }
-      cleanContent = cleanContent.replace(saveMatch[0], '');
-    }
-
-    return { cleanContent: cleanContent.trim(), actionLogs };
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

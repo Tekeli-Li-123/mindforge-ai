@@ -33,12 +33,15 @@
   --color-error: #f87171;
   --color-info: #60a5fa;
 
-  /* Mastery Colors */
-  --color-mastery-none: #606078;
-  --color-mastery-low: #f87171;
-  --color-mastery-medium: #fbbf24;
-  --color-mastery-high: #34d399;
-  --color-mastery-full: #7c5cfc;
+  /* Mastery Colors - Refined for Glow */
+  --color-mastery-red: #ff4d4d;
+  --color-mastery-yellow: #fbbf24;
+  --color-mastery-green: #34d399;
+  --color-mastery-blue: #7c5cfc;
+
+  --color-glass-node: rgba(22, 22, 34, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.08);
+  --shadow-node: 0 8px 32px rgba(0, 0, 0, 0.3);
 
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -257,62 +260,102 @@ input:focus, textarea:focus {
 /* ==========================================
    MindMap Node Overrides (Global for size comp.)
 ========================================== */
+/* ==========================================
+   MindMap Node Overrides (Premium Glassmorphism)
+========================================== */
 .mindmap-node-box {
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 6px 12px;
+  position: relative;
+  background: var(--color-glass-node);
+  background-image: linear-gradient(
+    to right, 
+    var(--node-glow-color) 0%, 
+    var(--node-glow-color) var(--node-progress), 
+    transparent var(--node-progress)
+  );
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-glass-border);
+  border-left: 3px solid var(--node-color);
+  border-radius: var(--radius-md);
+  padding: 10px 20px;
+  margin: 4px; /* Give space for scaling and focus shadows */
+  
   color: var(--color-text-primary);
   font-family: var(--font-family);
   font-size: 14px;
   font-weight: 500;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  transition: all var(--transition-fast);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  display: inline-block;
-  min-width: max-content; /* Prevents extreme inline width squeeze */
+  line-height: 1.4;
+  
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              box-shadow 0.3s ease, 
+              border-color 0.3s ease,
+              background 0.5s ease-out;
+  
+  box-shadow: var(--shadow-node); 
+  
+  display: inline-flex;
+  align-items: center;
+  min-width: max-content;
+  /* Removed overflow: hidden to prevent hover clipping in SVG foreignObject */
+}
+
+.node-content {
+  position: relative;
+  z-index: 1;
 }
 
 .mindmap-node-box:hover {
-  border-color: var(--color-accent);
-  background: var(--color-bg-secondary);
-  box-shadow: 0 0 12px var(--color-accent-light);
+  transform: scale(1.04) translateY(-2px); /* Slightly reduced scale for stability */
+  border-color: var(--node-color);
+  background-color: var(--color-bg-tertiary);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 10;
 }
 
 .mindmap-node-box.selected {
   border-color: var(--color-info);
-  background: rgba(96, 165, 250, 0.15);
-  box-shadow: 0 0 0 2px var(--color-info);
-}
-
-.selection-marquee {
-  position: fixed;
-  background: rgba(96, 165, 250, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.5);
-  pointer-events: none;
-  z-index: 9999;
+  background: rgba(96, 165, 250, 0.1);
+  box-shadow: 0 0 0 2px var(--color-info), 
+              0 0 20px rgba(96, 165, 250, 0.3);
 }
 
 .mindmap-root-node {
   background: var(--color-accent-gradient);
-  border-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
   font-size: 16px;
   font-weight: 700;
-  padding: 10px 18px;
-  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.3);
+  padding: 12px 24px;
+  box-shadow: 0 8px 32px rgba(124, 92, 252, 0.4),
+              0 0 20px rgba(124, 92, 252, 0.2);
+  transform: none;
+}
+
+.mindmap-root-node::before {
+  display: none; /* Root handles its own color */
+}
+
+.mindmap-root-node:hover {
+  transform: scale(1.04);
+  background: var(--color-accent-gradient);
+  box-shadow: 0 12px 40px rgba(124, 92, 252, 0.5);
 }
 
 .markmap-link {
-  stroke-width: 2;
-  opacity: 0.7;
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 1.5px;
+  opacity: 0.6;
+  transition: all 0.3s ease;
 }
 
 .markmap-node circle {
-  stroke-width: 2;
-  r: 5;
+  fill: var(--color-bg-primary);
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  r: 4;
 }
 
 /* UI Badges on Mindmap Nodes */
