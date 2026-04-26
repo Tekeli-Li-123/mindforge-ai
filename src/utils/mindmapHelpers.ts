@@ -133,6 +133,28 @@ export function findNodePath(root: MindMapNode, targetId: string): MindMapNode[]
 }
 
 /**
+ * 语义去重检测
+ * 移除常见噪音词（如“算法”、“概念”）并进行模糊匹配
+ */
+export function isSemanticDuplicate(text1: string, text2: string): boolean {
+  if (!text1 || !text2) return false;
+
+  const normalize = (s: string) => {
+    return s.toLowerCase()
+      .replace(/算法|概念|定义|简介|原理|系统|模型|方法|基础/g, '')
+      .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '') // 移除特殊字符和空格
+      .trim();
+  };
+
+  const n1 = normalize(text1);
+  const n2 = normalize(text2);
+
+  if (!n1 || !n2) return text1.trim() === text2.trim(); // 如果清理后空了，退化为严格匹配
+
+  return n1 === n2 || n1.includes(n2) || n2.includes(n1);
+}
+
+/**
  * 将 Markdown 文本解析为我们的 MindMapNode 结构
  */
 import { Transformer } from 'markmap-lib';

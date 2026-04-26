@@ -9,15 +9,24 @@ import {
 
 export type AIProvider = 'openai' | 'anthropic' | 'deepseek' | 'local';
 
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+
 export interface AISettings {
   provider: AIProvider;
   apiKey: string;
   baseUrl: string;
   model: string;
+  // 推理与生成控制
+  temperature: number;
+  maxTokens: number;
+  reasoningEffort: ReasoningEffort;
+  // Prompt 模板
   systemPrompt: string;
   refinePrompt: string;
   explainPrompt: string;
   reorganizePrompt: string;
+  // 高级自定义参数 (JSON String)
+  customPayload?: string;
 }
 
 interface SettingsStore {
@@ -31,10 +40,14 @@ export const defaultAISettings: AISettings = {
   apiKey: '',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o',
+  temperature: 0.7,
+  maxTokens: 4096,
+  reasoningEffort: 'off',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   refinePrompt: DEFAULT_REFINE_PROMPT,
   explainPrompt: DEFAULT_EXPLAIN_PROMPT,
-  reorganizePrompt: DEFAULT_REORGANIZE_PROMPT
+  reorganizePrompt: DEFAULT_REORGANIZE_PROMPT,
+  customPayload: ''
 };
 
 export const useSettingsStore = create<SettingsStore>()(

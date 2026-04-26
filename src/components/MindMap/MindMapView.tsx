@@ -27,12 +27,14 @@ export default function MindMapView() {
     updateProjectAIConfig,
     toggleChat,
     isChatOpen,
-    selectNode
+    selectNode,
+    updateProject
   } = useMindMapStore();
   
   // Track previous root reference to avoid unnecessary markmap re-renders
   // (e.g. when only aiConfig or updatedAt changes, not the tree itself)
   const prevRootRef = useRef<MindMapNode | null>(null);
+  const prevProjectIdRef = useRef<string | null>(null);
 
   // Context Menu State
   const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPosition | null>(null);
@@ -97,8 +99,80 @@ export default function MindMapView() {
   // Export Menu State
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
+  // Dynamic Generation State
+  const hasStartedGenerationRef = useRef<boolean>(false);
+  const [localGeneratingReasoning, setLocalGeneratingReasoning] = useState<string>('');
+
   // Track rendering state
   const isRendering = useRef(false);
+
+  // ---------------------------------------------------------
+  // Dynamic AI Generation Effect
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!currentProject || !currentProject.isGenerating) {
+      hasStartedGenerationRef.current = false;
+      setLocalGeneratingReasoning('');
+      return;
+    }
+
+    if (hasStartedGenerationRef.current) return;
+    hasStartedGenerationRef.current = true;
+
+    const req = currentProject.generationPrompt;
+    if (!req) {
+      updateProject(currentProject.id, { isGenerating: false });
+      return;
+    }
+
+    let lastUpdate = Date.now();
+    let accumulatedText = '';
+
+    generateMindMap(req, (chunk, isReasoning) => {
+      if (isReasoning) {
+        setLocalGeneratingReasoning(prev => prev + chunk);
+      } else {
+        accumulatedText += chunk;
+        const now = Date.now();
+        // 每 1000ms 更新一次画布，避免频繁重绘卡顿
+        if (now - lastUpdate > 1000) {
+          lastUpdate = now;
+          try {
+            const tempRoot = parseMarkdownToMindMapNode(accumulatedText);
+            if (req.title && (!tempRoot.content || tempRoot.content === '')) {
+              tempRoot.content = req.title;
+            }
+            updateProject(currentProject.id, { root: tempRoot });
+          } catch (e) {
+            // ignore partial parse errors
+          }
+        }
+      }
+    }).then(markdown => {
+      const finalRoot = parseMarkdownToMindMapNode(markdown);
+      if (req.title) finalRoot.content = req.title;
+      updateProject(currentProject.id, { 
+        root: finalRoot, 
+        isGenerating: false, 
+        generatingReasoning: '',
+        generationPrompt: undefined
+      });
+      setLocalGeneratingReasoning('');
+    }).catch(err => {
+      updateProject(currentProject.id, {
+        isGenerating: false,
+        root: {
+           id: 'root', 
+           content: `生成失败了 😔\n${err.message}`, 
+           depth: 0, 
+           mastery: 0, 
+           expanded: true, 
+           children: [] 
+        }
+      });
+      setLocalGeneratingReasoning('');
+    });
+  }, [currentProject?.id, currentProject?.isGenerating, currentProject?.generationPrompt, updateProject]);
 
   // Initialize and update markmap
   useEffect(() => {
@@ -117,7 +191,7 @@ export default function MindMapView() {
         
         if (!mmRef.current) {
           mmRef.current = Markmap.create(svgRef.current, {
-            autoFit: true,
+            autoFit: false,
             duration: 300,
             maxWidth: 250,
             paddingX: 40,
@@ -125,17 +199,22 @@ export default function MindMapView() {
           }, rootAST);
         } else {
           // Interrupt all ongoing d3 transitions to prevent NaN interpolation conflicts
-          const svg = (mmRef.current as any).svg;
-          if (svg && svg.selectAll) {
-            svg.selectAll('*').interrupt();
+          // 但是在流式生成期间，保留原生平滑动画，不打断不强制适应
+          if (!currentProject.isGenerating) {
+            const svg = (mmRef.current as any).svg;
+            if (svg && svg.selectAll) {
+              svg.selectAll('*').interrupt();
+            }
           }
-          
           await mmRef.current.setData(rootAST);
           
-          // Only fit if the container has dimensions
-          const { width, height } = svgRef.current.getBoundingClientRect();
-          if (width > 0 && height > 0) {
-            mmRef.current.fit();
+          if (prevProjectIdRef.current !== currentProject.id) {
+            // Only fit if the container has dimensions
+            const { width, height } = svgRef.current.getBoundingClientRect();
+            if (width > 0 && height > 0) {
+              mmRef.current.fit();
+            }
+            prevProjectIdRef.current = currentProject.id;
           }
         }
       } catch (err) {
@@ -646,33 +725,53 @@ export default function MindMapView() {
         const persona = currentProject.aiConfig?.persona || "";
         const personaPrefix = persona ? `你的人设是：${persona}\n\n` : "";
 
+        let accumulatedText = '';
+        let lastUpdate = Date.now();
+        const existingNode = findNodePath(currentProject.root, nId)?.pop();
+        const existingChildren = existingNode?.children || [];
+
+        const parseFlatMarkdown = (md: string) => {
+          const lines = md.split('\n');
+          const subNodes: any[] = [];
+          for (let line of lines) {
+             line = line.replace(/```(?:markdown)?/g, '').trim();
+             if (!line) continue;
+             const text = line.replace(/^[\s\-\*\#\d\.]+/, '').trim();
+             if (text && text.length > 0) {
+                 subNodes.push({
+                     id: generateId(),
+                     content: decodeHTMLEntities(text),
+                     depth: (existingNode?.depth || 0) + 1,
+                     mastery: 0,
+                     expanded: true,
+                     children: []
+                 });
+             }
+          }
+          return subNodes;
+        };
+
         const markdown = await generateMindMap({ 
           prompt: compiledPrompt,
           systemPromptOverride: personaPrefix + "你是一个严格执行命令的分类提取器。你的任务仅仅是为一个概念提取出它的『直接分类或特征』。极其重要：每次只能生成 1 层扁平列表！请必须使用 Markdown 无序列表（- 或 *）来直接罗列，绝对不可使用 # 标题进行深度嵌套树化，不要任何解释。"
+        }, (chunk, isReasoning) => {
+          if (isReasoning) {
+            setLocalGeneratingReasoning(prev => prev + chunk);
+          } else {
+            accumulatedText += chunk;
+            const now = Date.now();
+            if (now - lastUpdate > 1000) {
+              lastUpdate = now;
+              const tempSubNodes = parseFlatMarkdown(accumulatedText);
+              updateNode(nId, { children: [...existingChildren, ...tempSubNodes] });
+            }
+          }
         });
         
-        // 对于单层发散的平铺列表提取，我们直接执行字符串行解析，完美规避 AST 无根节点引起的解析崩溃
-        const lines = markdown.split('\n');
-        const subNodes: any[] = [];
-        for (let line of lines) {
-           line = line.replace(/```(?:markdown)?/g, '').trim();
-           if (!line) continue;
-           const text = line.replace(/^[\s\-\*\#\d\.]+/, '').trim();
-           if (text && text.length > 0) {
-               subNodes.push({
-                   id: generateId(),
-                   content: decodeHTMLEntities(text),
-                   depth: 0,
-                   mastery: 0,
-                   expanded: true,
-                   children: []
-               });
-           }
-        }
-        
-        appendChildren(nId, subNodes);
-        
-        updateNode(nId, { content: targetName });
+        // 最终更新
+        const finalSubNodes = parseFlatMarkdown(markdown);
+        updateNode(nId, { content: targetName, children: [...existingChildren, ...finalSubNodes] });
+        setLocalGeneratingReasoning('');
       } catch(e: any) {
         if (nodeIds.length === 1) alert('AI 细化失败: ' + e.message);
         updateNode(nId, { content: targetName });
@@ -706,6 +805,23 @@ export default function MindMapView() {
         WebkitUserSelect: marquee?.isDrawing ? 'none' : 'auto'
       }}
     >
+      {(currentProject?.isGenerating || localGeneratingReasoning) && (
+        <div className="generation-overlay">
+          <div className="generation-spinner">
+            <Sparkles className="spin-icon" size={20} />
+            <span>{currentProject?.isGenerating ? 'AI 正在动态构建导图...' : 'AI 正在思考中...'}</span>
+          </div>
+          {localGeneratingReasoning && (
+            <details className="generation-reasoning" open>
+              <summary>💭 正在深度思考 ({localGeneratingReasoning.length} 字符)...</summary>
+              <div className="reasoning-content">
+                <ReactMarkdown>{localGeneratingReasoning}</ReactMarkdown>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
       <svg 
         ref={svgRef} 
         id="mindmap-svg" 

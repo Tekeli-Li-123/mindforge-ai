@@ -111,6 +111,16 @@ export interface MindMapProject {
   updatedAt: number;
   /** 长期记忆 */
   memories?: string[];
+  /** 是否正在生成中（流式） */
+  isGenerating?: boolean;
+  /** 流式生成期间积累的思考内容 */
+  generatingReasoning?: string;
+  /** 用于重启/继续生成的初始参数 */
+  generationPrompt?: {
+    prompt: string;
+    title?: string;
+    description?: string;
+  };
 }
 
 /** 聊天消息 */
@@ -120,6 +130,8 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   isCompacted?: boolean;
+  /** AI 推理/思维过程（可选，来自推理模型的 thinking/reasoning 输出） */
+  reasoning?: string;
 }
 
 /** 考核题目 */

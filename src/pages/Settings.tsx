@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Settings as SettingsIcon, BrainCircuit, Key, Globe, Database, Check, Download, Upload } from 'lucide-react';
-import { useSettingsStore, defaultAISettings, type AIProvider } from '../stores/settingsStore';
+import { useState, useMemo } from 'react';
+import { Settings as SettingsIcon, BrainCircuit, Key, Globe, Database, Check, Download, Upload, Zap, Thermometer, Hash, Code } from 'lucide-react';
+import { useSettingsStore, defaultAISettings, type AIProvider, type ReasoningEffort } from '../stores/settingsStore';
 import { useMindMapStore } from '../stores/mindmapStore';
 import { downloadFile } from '../utils/mindmapHelpers';
+import { detectModelCapabilities, getMatchedRuleLabel } from '../config/modelCapabilities';
+import { buildRequestBody } from '../services/aiService';
 import './Settings.css';
 
 const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
@@ -13,10 +15,17 @@ const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
 };
 
 const PROVIDER_OPTIONS = [
-  { value: 'openai', label: 'OpenAI (GPT-4o, GPT-3.5)' },
-  { value: 'anthropic', label: 'Anthropic (Claude 3.5 Sonnet)' },
-  { value: 'deepseek', label: 'DeepSeek (deepseek-chat, deepseek-reasoner)' },
+  { value: 'openai', label: 'OpenAI (GPT-4o, o3, GPT-5)' },
+  { value: 'anthropic', label: 'Anthropic (Claude 4.6 Sonnet/Opus)' },
+  { value: 'deepseek', label: 'DeepSeek (V4 Pro / V4 Flash)' },
   { value: 'local', label: 'Local Model (Ollama / LM Studio)' },
+];
+
+const EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string; description: string }> = [
+  { value: 'off', label: '关闭', description: '不使用推理模式' },
+  { value: 'low', label: '低', description: '快速思考' },
+  { value: 'medium', label: '中等', description: '平衡速度与深度' },
+  { value: 'high', label: '深度', description: '最深度推理' },
 ];
 
 export default function Settings() {
@@ -29,8 +38,43 @@ export default function Settings() {
     refinePrompt: aiSettings.refinePrompt || defaultAISettings.refinePrompt,
     explainPrompt: aiSettings.explainPrompt || defaultAISettings.explainPrompt,
     reorganizePrompt: aiSettings.reorganizePrompt || defaultAISettings.reorganizePrompt,
+    customPayload: aiSettings.customPayload || defaultAISettings.customPayload || '',
   });
   const [showSavedState, setShowSavedState] = useState(false);
+
+  // 实时探测当前模型能力
+  const caps = useMemo(
+    () => detectModelCapabilities(formData.model, formData.provider),
+    [formData.model, formData.provider]
+  );
+  const matchedRule = useMemo(
+    () => getMatchedRuleLabel(formData.model, formData.provider),
+    [formData.model, formData.provider]
+  );
+
+  const previewJson = useMemo(() => {
+    try {
+      const mockMessages = [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'Hello!' }
+      ];
+      const body = buildRequestBody({
+        messages: mockMessages,
+        model: formData.model,
+        temperature: formData.temperature,
+        maxTokens: formData.maxTokens,
+        reasoningEffort: formData.reasoningEffort,
+        caps
+      });
+      if (formData.customPayload && formData.customPayload.trim()) {
+        const overrides = JSON.parse(formData.customPayload);
+        Object.assign(body, overrides);
+      }
+      return JSON.stringify(body, null, 2);
+    } catch (e) {
+      return '// 自定义 JSON 格式错误，请检查语法';
+    }
+  }, [formData, caps]);
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProvider = e.target.value as AIProvider;
@@ -41,8 +85,8 @@ export default function Settings() {
       baseUrl: DEFAULT_BASE_URLS[newProvider],
       // Reset model field to a hint depending on provider
       model: newProvider === 'openai' ? 'gpt-4o' 
-           : newProvider === 'anthropic' ? 'claude-3-5-sonnet-20240620' 
-           : newProvider === 'deepseek' ? 'deepseek-chat'
+           : newProvider === 'anthropic' ? 'claude-sonnet-4-20250514' 
+           : newProvider === 'deepseek' ? 'deepseek-v4-flash'
            : 'llama3',
     }));
   };
@@ -114,8 +158,32 @@ export default function Settings() {
             className="settings-input"
             value={formData.model}
             onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-            placeholder="例如: gpt-4o, claude-3-haiku, llama3"
+            placeholder="例如: gpt-4o, claude-sonnet-4-20250514, llama3"
           />
+          {/* 模型能力探测结果 */}
+          <div className="model-caps-banner">
+            <div className="model-caps-label">
+              <Zap size={12} />
+              {matchedRule ? `识别为：${matchedRule}` : '通用模型（默认配置）'}
+            </div>
+            <div className="model-caps-tags">
+              <span className={`cap-tag ${caps.isReasoning ? 'active' : ''}`}>
+                {caps.isReasoning ? '✅' : '—'} 推理模型
+              </span>
+              <span className={`cap-tag ${caps.supportsTemperature ? 'active' : ''}`}>
+                {caps.supportsTemperature ? '✅' : '❌'} Temperature
+              </span>
+              <span className={`cap-tag ${caps.reasoningControl !== 'none' ? 'active' : ''}`}>
+                {caps.reasoningControl !== 'none' ? '✅' : '—'} 思维强度
+              </span>
+              {caps.useNativeAnthropicAPI && (
+                <span className="cap-tag active">✅ 原生 Anthropic API</span>
+              )}
+              {caps.systemRoleAlternative && (
+                <span className="cap-tag active">🔄 {caps.systemRoleAlternative} role</span>
+              )}
+            </div>
+          </div>
         </div>
 
         {formData.provider !== 'local' && (
@@ -136,6 +204,93 @@ export default function Settings() {
             </p>
           </div>
         )}
+      </div>
+
+      {/* ═══════════════ 推理控制面板 ═══════════════ */}
+      <div className="settings-section">
+        <div className="settings-section-title">
+          <Zap size={20} className="gradient-text" />
+          推理控制 (Reasoning Control)
+        </div>
+
+        {/* 思维强度 */}
+        <div className="settings-form-group">
+          <label className="settings-label">
+            🧠 思维强度 (Reasoning Effort)
+          </label>
+          <div className="effort-selector">
+            {EFFORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={`effort-option ${formData.reasoningEffort === opt.value ? 'active' : ''}`}
+                onClick={() => setFormData({ ...formData, reasoningEffort: opt.value })}
+                disabled={
+                  opt.value !== 'off' && !caps.isReasoning && caps.reasoningControl === 'none'
+                }
+                title={opt.description}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="settings-hint">
+            {caps.isReasoning && caps.reasoningControl !== 'none'
+              ? '当前模型支持思维强度控制。开启后 AI 将使用思维链进行深度推理，token 消耗和响应时间会增加。'
+              : caps.isReasoning
+                ? '当前推理模型自动启用思维链，无需手动控制强度。'
+                : '当前模型不是推理模型，开启此选项可能无效（系统会自动降级处理）。'
+            }
+          </p>
+        </div>
+
+        {/* Temperature */}
+        <div className="settings-form-group">
+          <label className="settings-label">
+            <Thermometer size={14} style={{ display: 'inline', marginRight: '4px' }} />
+            Temperature — <span className="settings-value-badge">{formData.temperature.toFixed(2)}</span>
+          </label>
+          <div className="range-wrapper">
+            <input
+              type="range"
+              className="settings-range"
+              min="0"
+              max="2"
+              step="0.05"
+              value={formData.temperature}
+              onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
+              disabled={!caps.supportsTemperature}
+            />
+            <div className="range-labels">
+              <span>精确 0</span>
+              <span>创意 2</span>
+            </div>
+          </div>
+          {!caps.supportsTemperature && (
+            <p className="settings-hint warning">
+              ⚠️ 当前推理模型不支持 Temperature 参数，该值将被自动忽略。
+            </p>
+          )}
+        </div>
+
+        {/* Max Tokens */}
+        <div className="settings-form-group">
+          <label className="settings-label">
+            <Hash size={14} style={{ display: 'inline', marginRight: '4px' }} />
+            最大输出 Token (Max Tokens)
+          </label>
+          <input
+            type="number"
+            className="settings-input"
+            value={formData.maxTokens}
+            onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 4096 })}
+            min={256}
+            max={128000}
+            step={256}
+          />
+          <p className="settings-hint">
+            控制 AI 单次回复的最大 token 数量。推荐 4096，复杂导图生成可设为 8192+。
+          </p>
+        </div>
       </div>
 
       <div className="settings-section">
@@ -199,6 +354,38 @@ export default function Settings() {
             value={formData.reorganizePrompt}
             onChange={(e) => setFormData({ ...formData, reorganizePrompt: e.target.value })}
             placeholder="支持变量: {{context}}, {{childrenMarkdown}}"
+          />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">
+          <Code size={20} className="gradient-text" />
+          高级自定义参数 (JSON Override)
+        </div>
+        
+        <div className="settings-form-group">
+          <label className="settings-label">
+            请求体预览 (Preview)
+          </label>
+          <pre className="settings-select" style={{ fontSize: '12px', background: 'var(--color-bg-secondary)', padding: '10px', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {previewJson}
+          </pre>
+          <p style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>
+            这是根据当前设置生成的模拟请求体。如果您需要在请求中添加额外的特殊参数（如 top_p, stream 等），可以在下方填入 JSON 覆盖这些设置。
+          </p>
+        </div>
+
+        <div className="settings-form-group">
+          <label className="settings-label">
+            自定义参数覆盖 (Custom JSON)
+          </label>
+          <textarea
+            className="settings-select"
+            style={{ minHeight: '100px', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+            value={formData.customPayload || ''}
+            onChange={(e) => setFormData({ ...formData, customPayload: e.target.value })}
+            placeholder='例如: { "top_p": 0.9, "presence_penalty": 0.5 }'
           />
         </div>
 

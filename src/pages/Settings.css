@@ -80,6 +80,10 @@
   letter-spacing: 0.1em;
 }
 
+.settings-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;
@@ -125,4 +129,187 @@
   align-items: center;
   gap: var(--space-2);
   animation: fadeIn var(--transition-fast) ease-in-out;
+}
+
+/* ═══════════════ 模型能力探测标签 ═══════════════ */
+
+.model-caps-banner {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(124, 92, 252, 0.04);
+  border: 1px solid rgba(124, 92, 252, 0.15);
+  border-radius: var(--radius-lg);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.model-caps-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.model-caps-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cap-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border);
+  transition: all 0.2s;
+}
+
+.cap-tag.active {
+  background: rgba(124, 92, 252, 0.1);
+  color: var(--color-accent);
+  border-color: rgba(124, 92, 252, 0.25);
+}
+
+/* ═══════════════ 推理强度选择器 ═══════════════ */
+
+.effort-selector {
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.effort-option {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  position: relative;
+}
+
+.effort-option:not(:last-child) {
+  border-right: 1px solid var(--color-border);
+}
+
+.effort-option:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.effort-option.active {
+  background: var(--color-accent);
+  color: white;
+  font-weight: 600;
+}
+
+.effort-option.active:hover {
+  background: var(--color-accent-hover);
+}
+
+.effort-option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ═══════════════ Temperature 滑块 ═══════════════ */
+
+.range-wrapper {
+  position: relative;
+}
+
+.settings-range {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(
+    to right,
+    rgba(92, 160, 252, 0.3),
+    rgba(124, 92, 252, 0.5),
+    rgba(252, 92, 124, 0.3)
+  );
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.settings-range:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.settings-range::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.settings-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}
+
+/* ═══════════════ 设置提示文本 ═══════════════ */
+
+.settings-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+.settings-hint.warning {
+  color: #e8a838;
+}
+
+.settings-value-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(124, 92, 252, 0.1);
+  color: var(--color-accent);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
 }

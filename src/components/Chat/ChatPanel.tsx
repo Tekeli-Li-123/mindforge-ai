@@ -3,7 +3,7 @@ import { X, Send, Bot, User, Sparkles, Trash2, Brain } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { ChatMessage } from '../../types';
 import { useMindMapStore } from '../../stores/mindmapStore';
-import { chatWithAI } from '../../services/aiService';
+import { chatWithAI, type AIResponse } from '../../services/aiService';
 import { skillRegistry } from '../../services/skills';
 import { memoryService } from '../../services/memoryService';
 import { findNodePath, decodeHTMLEntities, flattenNodes } from '../../utils/mindmapHelpers';
@@ -32,6 +32,7 @@ export default function ChatPanel() {
   
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [actionLabel, setActionLabel] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -71,10 +72,34 @@ export default function ChatPanel() {
     try {
       // 包含历史记录
       const history = [...chatMessages, userMessage];
-      const rawAiResponse = await chatWithAI(history, contextData?.node, contextData?.pathString);
+
+      setStreamingMessage({
+        id: `msg-${Date.now() + 1}`,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      });
+
+      const aiResponse: AIResponse = await chatWithAI(
+        history, 
+        contextData?.node, 
+        contextData?.pathString,
+        (chunk, isReasoning) => {
+          setStreamingMessage((prev) => {
+            if (!prev) return prev;
+            if (isReasoning) {
+              return { ...prev, reasoning: (prev.reasoning || '') + chunk };
+            } else {
+              return { ...prev, content: prev.content + chunk };
+            }
+          });
+        }
+      );
       
+      setStreamingMessage(null);
+
       // 处理 AI 指令 - 接入统一技能引擎
-      const { cleanContent, actionLogs } = await processAiCommands(rawAiResponse);
+      const { cleanContent, actionLogs } = await processAiCommands(aiResponse.content);
       
       if (actionLogs.length > 0) {
         setActionLabel(`✨ AI 已同步执行了 ${actionLogs.length} 项导图变更`);
@@ -86,6 +111,7 @@ export default function ChatPanel() {
         role: 'assistant' as const,
         content: cleanContent,
         timestamp: Date.now(),
+        reasoning: aiResponse.reasoning || undefined,
       };
 
       // 更新消息列表
@@ -143,6 +169,7 @@ export default function ChatPanel() {
     // 统一分发至技能注册中心执行
     return await skillRegistry.dispatch(content, {
       allNodes,
+      root: currentProject.root,
       appendChildren,
       deleteNodes,
       updateNode,
@@ -211,6 +238,16 @@ export default function ChatPanel() {
                     <div className="system-log">{msg.content}</div>
                   ) : msg.role === 'assistant' ? (
                     <div className="markdown-content">
+                      {msg.reasoning && (
+                        <details className="reasoning-block">
+                          <summary>
+                            💭 查看思维过程 ({msg.reasoning.length} 字符)
+                          </summary>
+                          <div className="reasoning-content">
+                            <ReactMarkdown>{msg.reasoning}</ReactMarkdown>
+                          </div>
+                        </details>
+                      )}
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   ) : (
@@ -228,7 +265,33 @@ export default function ChatPanel() {
               </div>
             </div>
           ))}
-          {isTyping && (
+          
+          {streamingMessage && (
+            <div className="chat-message assistant">
+              <div className="chat-avatar ai">
+                <Bot size={16} />
+              </div>
+              <div className="chat-bubble-wrapper">
+                <div className="chat-bubble">
+                  <div className="markdown-content">
+                    {streamingMessage.reasoning && (
+                      <details className="reasoning-block" open>
+                        <summary>
+                          💭 正在思考 ({streamingMessage.reasoning.length} 字符)...
+                        </summary>
+                        <div className="reasoning-content">
+                          <ReactMarkdown>{streamingMessage.reasoning}</ReactMarkdown>
+                        </div>
+                      </details>
+                    )}
+                    <ReactMarkdown>{streamingMessage.content}</ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isTyping && !streamingMessage && (
             <div className="chat-message assistant">
               <div className="chat-avatar ai">
                 <Bot size={14} />

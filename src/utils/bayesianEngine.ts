@@ -31,7 +31,7 @@ export const ASSESSMENT_PRESETS: Record<CognitivePreset, CognitiveWeightConfig> 
 };
 
 /**
- * 初始先验状态 (Pessimistic Prior: alpha=2, beta=8 => 20% Mastery)
+ * 初始先验状态 (Deep Skeptic Prior: alpha=1, beta=19 => 5% Mastery)
  */
 export const INITIAL_COGNITIVE_STATE: CognitiveState = {
   alpha: 2,

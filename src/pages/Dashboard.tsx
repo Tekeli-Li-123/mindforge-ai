@@ -32,11 +32,18 @@ export default function Dashboard() {
        updatedAt: Date.now(),
        root: { 
          id: 'root', 
-         content: '正在全力思考中，请稍候... ✨', 
+         content: newProjectParams.title || '正在思考导图结构...', 
          depth: 0, 
          mastery: 0, 
          expanded: true, 
          children: [] 
+       },
+       isGenerating: true,
+       generatingReasoning: '',
+       generationPrompt: {
+         prompt: newProjectParams.prompt,
+         title: newProjectParams.title,
+         description: newProjectParams.description,
        }
     };
 
@@ -44,29 +51,6 @@ export default function Dashboard() {
     setCurrentProject(newProject);
     setIsModalOpen(false);
     navigate('/editor');
-
-    // Run AI call in background
-    generateMindMap({
-      prompt: newProjectParams.prompt,
-      title: newProjectParams.title,
-      description: newProjectParams.description,
-    }).then(markdown => {
-      const rootNode = parseMarkdownToMindMapNode(markdown);
-      if (newProjectParams.title) {
-        rootNode.content = newProjectParams.title;
-      }
-      updateProjectRoot(projectId, rootNode);
-    }).catch(err => {
-      console.error(err);
-      updateProjectRoot(projectId, {
-         id: 'root', 
-         content: `生成失败了 😔\n${err.message}`, 
-         depth: 0, 
-         mastery: 0, 
-         expanded: true, 
-         children: [] 
-      });
-    });
   };
 
   const totalNodes = projects.reduce(

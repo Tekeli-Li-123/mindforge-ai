@@ -384,3 +384,69 @@
   cursor: not-allowed;
   transform: none;
 }
+
+/* Reasoning / Thinking Block */
+.reasoning-block {
+  margin-bottom: 10px;
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.reasoning-block[open] {
+  border-color: rgba(124, 92, 252, 0.35);
+}
+
+.reasoning-block summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background: rgba(124, 92, 252, 0.05);
+  user-select: none;
+  transition: all 0.2s;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reasoning-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning-block summary::before {
+  content: '▶';
+  font-size: 8px;
+  transition: transform 0.2s;
+}
+
+.reasoning-block[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.reasoning-block summary:hover {
+  background: rgba(124, 92, 252, 0.1);
+  color: var(--color-accent);
+}
+
+.reasoning-content {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  border-top: 1px solid rgba(124, 92, 252, 0.1);
+  max-height: 300px;
+  overflow-y: auto;
+  background: rgba(124, 92, 252, 0.02);
+}
+
+.reasoning-content p {
+  margin: 0 0 6px 0;
+}
+
+.reasoning-content p:last-child {
+  margin-bottom: 0;
+}

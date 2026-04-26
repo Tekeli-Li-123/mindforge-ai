@@ -1,49 +1,68 @@
-# MindForge AI 任务追踪 (Task Tracker)
+# AI 学习辅助 — MindForge AI 项目进度
 
-## 🟢 已完成 (Completed)
-
-### 1. 基础架构与 UI
-- [x] 基于 Vite + React + TypeScript 的项目搭建
-- [x] Zustand 状态管理实现（多项目、设置、聊天状态）
-- [x] Markmap 矢量导图引擎集成与 D3 布局优化
-- [x] 响应式侧边栏（设置 & AI 助手）
-- [x] 背景流光动效与毛玻璃 UI 设计
-
-### 2. AI 协作与技能系统
-- [x] 模块化技能注册中心 (Skill Registry)
-- [x] 基础导图操作技能 (`ADD_NODE`, `DELETE_NODE`, `RENAME_NODE`)
-- [x] 概念解释同步技能 (`SAVE_EXPLAIN`)
-- [x] 掌握度动态更新技能 (`UPDATE_MASTERY`)
-- [x] 技能分发器 (Skill Dispatcher) 自动解析正则匹配
-
-### 3. 记忆引擎 (Memory Engine)
-- [x] 对话上下文自动总结与压缩 (15 条阈值)
-- [x] 核心见解深度提取 (Facts Extraction)
-- [x] 长期记忆沉淀 (`MEMORY_FLUSH`)
-
-### 4. 交互与导出
-- [x] 右键上下文菜单与多选 (Marquee Selection)
-- [x] 节点细化 (Refine) 与自动重组 (Reorganize)
-- [x] 高清图片 (PNG)、Markdown、JSON 导出功能
-
-### 5. 关键修复
-- [x] 修复 ESM 模式下的模块导出解析错误
-- [x] 修复节点细化逻辑中导致的内容丢失 ([object Object]) 问题
+## 第一阶段：框架搭建 ✅
+- [x] 项目初始化 (Vite + React + TypeScript)
+- [x] 设计系统 (CSS 变量 + 暗色主题 + 动画)
+- [x] 类型定义 (MindMapNode, ChatMessage, QuizQuestion)
+- [x] 状态管理 (Zustand store + 示例导图数据)
+- [x] 布局组件 (Sidebar 侧边栏 + Header 顶栏)
+- [x] 页面路由 (React Router: /, /editor, /quiz, /settings)
+- [x] Dashboard 仪表盘页 (统计卡片 + 快速入口 + 项目列表)
+- [x] MapEditor 导图编辑页 (markmap 渲染 + 缩放工具栏)
+- [x] Chat 对话面板 (欢迎状态 + 快捷指令 + 消息列表 + 输入框)
+- [x] Quiz 考核页 (Assessment Modal 交互流)
+- [x] 工具函数 (节点统计, 掌握度计算, Markdown 转换)
 
 ---
 
-## 🟡 进行中 (In Progress)
+## 第二阶段：核心功能 ✅
+### AI 导图生成
+- [x] 新建导图弹窗（输入主题）
+- [x] AI API 接入层（OpenAI/Claude 兼容接口）
+- [x] AI 生成 Markdown → markmap 解析 → 导图渲染
+- [x] 生成中 loading 动画
+- [x] 生成结果保存到 store
 
-- [ ] **认知诊断模型升级**: 细化 `UPDATE_MASTERY` 的打分算法，引入简单的贝叶斯知识追踪概念。
-- [ ] **UI 细节优化**: 进一步压缩侧边栏空间占用，增强手机端适配。
+### AI 对话式细化
+- [x] AI 聊天真实接入（调用 LLM API）
+- [x] "展开节点" 指令 → AI 生成子节点 → 追加到导图
+- [x] "解释概念" 指令 → AI 返回解释文本并同步至 `explanation`
+- [x] "重组导图" 指令 → AI 重新组织结构
+- [x] 节点右键菜单（展开 / 编辑 / 删除 / AI 细化 / 解释 / 重组）
+- [x] **记忆整理 (`MEMORY_FLUSH`)**：对话摘要提取与事实沉淀
+
+### 导图交互增强
+- [x] 节点点击选中 + 高亮（支持 Ctrl 多选与纯享版拖拽框选）
+- [x] 手动添加/编辑/删除节点（包含多节点一键批量删除）
+- [x] **节点背景反映掌握度**：红-黄-绿动态背景进度条
+- [x] 导图数据导出（Markdown / JSON / 高清图片）
+- [x] 导图数据持久化（LocalStorage 集成，带重载自动恢复）
+
+### AI 考核系统 (V1.5)
+- [x] AI 基于导图生成单选题 (Choice)
+- [x] AI 基于导图生成判断题 (True/False)
+- [x] AI 基于导图生成问答题 (Open-Ended)
+- [x] **自适应考官要求系统**：支持用户定义考官风格与需求
+- [x] 答题界面（选项、提交、贝叶斯逻辑反馈）
+- [x] 答题结果动态更新节点掌握度 (贝叶斯分布演算)
+- [x] 考核报告页面（正确率、掌握度对比分析）
+
+### 设置页 & 数据持久化
+- [x] 多导图项目管理（创建/切换/删除）
+- [x] LocalStorage 数据持久化
+- [x] 导入/导出 JSON 文件
+- [x] 全局 API 设置页：配置默认接入的模型类型 (本地/云端)
+- [x] 全局 API 设置页：配置 API Key 和 Base URL
+- [x] 新建导图弹窗：仅配置当前主题与导图特定参数
 
 ---
 
-## ⚪ 待办 (Backlog)
-
-- [ ] **自测题自动生成**: 根据导图选中的知识点，自动生成选择题或简答题进行考核。
-- [ ] **多端同步能力**: 接入云端存储或 WebRTC 实时协作。
-- [ ] **主题系统**: 支持除暗黑模式外的更多专业配色方案。
+## 第三阶段：打磨 & 增强（进行中）
+- [ ] **认知上下文引擎 (CCE) / V2.0**：长对话摘要、图谱剪枝与分层记忆检索 [/]
+- [ ] **间隔重复 (Spaced Repetition)**：基于掌握度的复习提醒系统
+- [ ] **学习路径可视化**：推荐下一步学习节点的关联路径
+- [ ] **移动端适配**：深度优化移动端交互与显示
+- [ ] **梦境分析 (The Dreaming)**：后台自动分析掌握度薄弱项并整合知识
 
 ---
-*上次更新: 2026-04-11*
+*上次更新: 2026-04-11 (V1.5 节点)*

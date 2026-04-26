@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Brain, CheckCircle2, AlertCircle, ArrowRight, Loader2, Sparkles, Send, Layers, ListChecks, HelpCircle } from 'lucide-react';
+import { Brain, CheckCircle2, AlertCircle, ArrowRight, Loader2, Sparkles, Send, Layers, ListChecks, HelpCircle, AlertTriangle, RefreshCw, SkipForward } from 'lucide-react';
 import Modal from '../common/Modal';
 import { AssessmentService } from '../../services/assessmentService';
-import { updateCognitiveState, formatMasteryPercentage, ASSESSMENT_PRESETS, calculateProxyEvidence } from '../../utils/bayesianEngine';
+import { updateCognitiveState, formatMasteryPercentage, ASSESSMENT_PRESETS, calculateProxyEvidence, INITIAL_COGNITIVE_STATE } from '../../utils/bayesianEngine';
 import { useMindMapStore } from '../../stores/mindmapStore';
 import type { MindMapNode, QuizQuestion, LLMEvidence, CognitiveState } from '../../types';
 import './AssessmentModal.css';
@@ -24,11 +24,20 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
   const [questionCount, setQuestionCount] = useState(3);
   const [allowedTypes, setAllowedTypes] = useState<('choice' | 'trueFalse' | 'openEnded')[]>(['openEnded', 'choice']);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState('');
   const [sessionEvidences, setSessionEvidences] = useState<LLMEvidence[]>([]);
+  const [sessionResults, setSessionResults] = useState<{
+    question: string;
+    type: string;
+    userAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    explanation: string;
+  }[]>([]);
   const [masteryData, setMasteryData] = useState<{ before: number; after: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,16 +47,16 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
     { label: '🎓 专家深挖', prompt: '专家水平：侧重深度分析、逻辑辨析与底层原理，考查知识点的深度关联。' }
   ];
 
-  // 初始化：重置状态
   useEffect(() => {
-    if (isOpen && node) {
+    if (isOpen) {
       setStep('setup');
       setError(null);
       setUserAnswer('');
       setCurrentIndex(0);
       setSessionEvidences([]);
+      setSessionResults([]);
     }
-  }, [isOpen, node]);
+  }, [isOpen, node?.id]); // 修正：仅在项目开启或切换节点时重置，避免更新掌握度时因 node 对象引用变化导致重置
 
   const optimizeDifficultyPrompt = async () => {
     if (!difficultyPrompt.trim()) return;
@@ -64,10 +73,6 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
   };
 
   const initAssessment = async () => {
-    if (allowedTypes.length === 0) {
-      setError('请至少选择一种题型');
-      return;
-    }
     setStep('loading');
     setError(null);
     try {
@@ -84,6 +89,53 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
     } catch (err: any) {
       setError(err.message || '无法生成题目');
       setStep('setup');
+    }
+  };
+
+  const handleRegenerateQuestion = async () => {
+    const currentQ = questions[currentIndex];
+    if (!currentQ || isRegenerating) return;
+
+    setIsRegenerating(true);
+    try {
+      const newQ = await AssessmentService.regenerateQuestion(
+        node,
+        contextPath,
+        currentQ.question,
+        difficultyPrompt,
+        allowedTypes.length === 0 ? ['choice', 'trueFalse', 'openEnded'] : allowedTypes
+      );
+      
+      const newQuestions = [...questions];
+      newQuestions[currentIndex] = newQ;
+      setQuestions(newQuestions);
+      setUserAnswer('');
+    } catch (err: any) {
+      setError('重新生成失败：' + err.message);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleSkipQuestion = () => {
+    const currentQ = questions[currentIndex];
+    
+    // 记录跳过结果
+    setSessionResults(prev => [...prev, {
+      question: currentQ.question,
+      type: currentQ.type,
+      userAnswer: '（用户已跳过此题）',
+      correctAnswer: currentQ.correctAnswer || (currentQ.type === 'openEnded' ? '见标准答案' : ''),
+      isCorrect: false,
+      explanation: '该题目已被用户标记为有误并跳过。',
+      isSkipped: true as any // 扩展字段
+    }]);
+
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setUserAnswer('');
+    } else {
+      finalizeSession(sessionEvidences);
     }
   };
 
@@ -106,8 +158,56 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
         );
       } else {
         // 简单对错匹配 (代理评估)
-        const isCorrect = userAnswer.trim() === (currentQ.correctAnswer || '').trim();
+        const cleanAnswer = userAnswer.trim().toLowerCase();
+        const cleanCorrect = (currentQ.correctAnswer || '').trim().toLowerCase();
+        
+        // 1. 布尔映射增强 (判断题专用)
+        const booleanMap: Record<string, string[]> = {
+            '正确': ['正确', '对', 'true', 'yes', '1'],
+            '错误': ['错误', '错', 'false', 'no', '0']
+        };
+
+        const isBooleanMatch = (input: string, target: string) => {
+            for (const [key, aliases] of Object.entries(booleanMap)) {
+                if (aliases.includes(input) && aliases.includes(target)) return true;
+                if (key === input && aliases.includes(target)) return true;
+                if (key === target && aliases.includes(input)) return true;
+            }
+            return false;
+        };
+
+        // 2. 匹配检查
+        const isLiteralMatch = cleanAnswer === cleanCorrect;
+        const isBoolMatch = currentQ.type === 'trueFalse' && isBooleanMatch(cleanAnswer, cleanCorrect);
+        const isOptionMatch = currentQ.type === 'choice' && currentQ.options?.some((opt, idx) => {
+            const label = String.fromCharCode(65 + idx).toLowerCase();
+            return (cleanAnswer === label || cleanAnswer === opt.toLowerCase()) && opt.toLowerCase() === cleanCorrect;
+        });
+
+        const isCorrect = isLiteralMatch || isBoolMatch || isOptionMatch;
         evidence = calculateProxyEvidence(isCorrect, currentQ.difficulty);
+
+        // 记录结果供复盘使用
+        setSessionResults(prev => [...prev, {
+            question: currentQ.question,
+            type: currentQ.type,
+            userAnswer,
+            correctAnswer: currentQ.correctAnswer || '',
+            isCorrect,
+            explanation: currentQ.explanation || ''
+        }]);
+      }
+
+      // 处理问答题的结果记录 (由于 extractEvidence 是纯逻辑，我们在其后手动记录)
+      if (currentQ.type === 'openEnded') {
+          setSessionResults(prev => [...prev, {
+              question: currentQ.question,
+              type: currentQ.type,
+              userAnswer,
+              correctAnswer: currentQ.referenceAnswer || '见 AI 评估结果',
+              isCorrect: (evidence as any).recall >= 0.6, // 简化的“正确”标记
+              explanation: (evidence as any).feedback || ''
+          }]);
       }
 
       const newEvidences = [...sessionEvidences, evidence];
@@ -130,12 +230,7 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
 
   const finalizeSession = (evidences: LLMEvidence[]) => {
     // 聚合更新 (简单的线性更新，或逐个更新)
-    let currentState = (currentProject?.cognitiveStates || {})[node.id] || {
-      alpha: 2,
-      beta: 8,
-      lastUpdate: Date.now(),
-      evidenceHistory: []
-    };
+    let currentState = (currentProject?.cognitiveStates || {})[node.id] || INITIAL_COGNITIVE_STATE;
 
     const preset = currentProject?.cognitiveConfig?.preset || 'balanced';
     const weights = currentProject?.cognitiveConfig?.customWeights || ASSESSMENT_PRESETS[preset];
@@ -143,10 +238,12 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
     let lastMasteryAfter = 0;
     let firstMasteryBefore = 0;
 
+    // 过滤掉因为跳过而可能产生的空证据，或者确保 evidences 数量与题目匹配
+    // 这里的实现方式是 evidences 仅包含已回答题目产生的证据
     evidences.forEach((ev, idx) => {
       const { newState, masteryBefore, masteryAfter } = updateCognitiveState(
         currentState as CognitiveState,
-        { ...ev, question: questions[idx].question, userAnswer: 'Session Answer' },
+        { ...ev, question: 'Diagnostic Session', userAnswer: 'Aggregated Evidence' },
         weights
       );
       currentState = newState;
@@ -306,7 +403,8 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
                 <span className="progress-text">第 {currentIndex + 1} / {questions.length} 题</span>
             </div>
 
-            <div className="question-content">
+            <div className={`question-content ${isRegenerating ? 'dimmed' : ''}`}>
+                {isRegenerating && <div className="content-loader"><Loader2 className="spinner" /></div>}
                 <span className="type-badge">{questions[currentIndex].type.toUpperCase()}</span>
                 <p className="question-text">{questions[currentIndex].question}</p>
 
@@ -347,6 +445,20 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
             </div>
 
             <div className="assessment-actions">
+              <div className="question-error-control">
+                <button className="error-report-trigger" title="题目有误？">
+                  <AlertTriangle size={14} /> 题目有误
+                  <div className="error-actions-popover">
+                    <button onClick={handleRegenerateQuestion} disabled={isRegenerating}>
+                      <RefreshCw size={12} className={isRegenerating ? 'spinner' : ''} /> 重新生成
+                    </button>
+                    <button onClick={handleSkipQuestion}>
+                      <SkipForward size={12} /> 跳过此题
+                    </button>
+                  </div>
+                </button>
+              </div>
+
               <button 
                 className="btn-primary" 
                 onClick={handleAnswerSubmit}
@@ -367,7 +479,7 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
 
         {step === 'summary' && (
           <div className="assessment-feedback-view animate-slide-up">
-            <h3 className="summary-title"><Sparkles size={20} /> 诊断总结</h3>
+            <h3 className="summary-title"><Sparkles size={20} /> 深度诊断报告</h3>
             
             <div className="mastery-shift-card">
               <div className="mastery-score-group">
@@ -377,27 +489,86 @@ export default function AssessmentModal({ isOpen, onClose, node, contextPath }: 
                 </div>
                 <ArrowRight size={24} className="shift-arrow" />
                 <div className="score-item after">
-                  <span className="label">最终测评结果</span>
+                  <span className="label">评估后掌握度</span>
                   <span className="value">{formatMasteryPercentage(masteryData?.after || 0)}%</span>
                 </div>
               </div>
+
               <div className="mastery-progress-bar">
-                <div className="progress-bg" />
-                <div 
-                  className="progress-fill" 
-                  style={{ width: `${formatMasteryPercentage(masteryData?.after || 0)}%` }} 
-                />
+                <div className="progress-fill" style={{ width: `${(masteryData?.after || 0) * 100}%` }} />
               </div>
             </div>
 
-            <div className="summary-note">
-                <CheckCircle2 size={16} color="var(--color-success)" />
-                <p>完成了 {questions.length} 道题目的深层诊断。你现在的掌握情况已同步至全局热力图。</p>
+            <div className="diagnostic-details">
+                <div className="detail-section">
+                    <h4><Layers size={16} /> 认知维度细分</h4>
+                    <div className="dimension-grid">
+                        {['recall', 'comprehension', 'application', 'analysis'].map(dim => {
+                            const avgValue = sessionEvidences.length > 0 
+                                ? sessionEvidences.reduce((sum, ev) => sum + (ev[dim as keyof LLMEvidence] as number || 0), 0) / sessionEvidences.length 
+                                : 0;
+                            const label = dim === 'recall' ? '核心记忆' : dim === 'comprehension' ? '概念理解' : dim === 'application' ? '知识应用' : '深度分析';
+                            return (
+                                <div key={dim} className="dimension-item">
+                                    <div className="dim-label">
+                                        <span>{label}</span>
+                                        <span>{Math.round(avgValue * 100)}%</span>
+                                    </div>
+                                    <div className="dim-bar">
+                                        <div className="dim-fill" style={{ width: `${avgValue * 100}%` }} />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {sessionEvidences.some(ev => ev.suggestion) && (
+                    <div className="detail-section highlight">
+                        <h4><Brain size={16} /> AI 学习建议</h4>
+                        <ul className="suggestion-list">
+                            {Array.from(new Set(sessionEvidences.filter(ev => ev.suggestion).map(ev => ev.suggestion))).map((sug, i) => (
+                                <li key={i}>{sug}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
+                <div className="detail-section review-section">
+                    <h4><ListChecks size={16} /> 测验复盘</h4>
+                    <div className="review-list">
+                        {sessionResults.map((res: any, i) => (
+                            <div key={i} className={`review-card ${res.isSkipped ? 'skipped' : (res.isCorrect ? 'correct' : 'incorrect')}`}>
+                                <div className="review-header">
+                                    <span className="q-index">Q{i+1}</span>
+                                    {res.isSkipped ? <SkipForward size={16} color="var(--color-text-dim)" /> : (res.isCorrect ? <CheckCircle2 size={16} color="var(--color-success)" /> : <AlertCircle size={16} color="var(--color-error)" />)}
+                                </div>
+                                <p className="review-q-text">{res.question}</p>
+                                <div className="answer-grid">
+                                    <div className="answer-col">
+                                        <span className="label">你的回答</span>
+                                        <span className={`val ${res.isSkipped ? 'dim' : (res.isCorrect ? 'correct' : 'incorrect')}`}>{res.userAnswer}</span>
+                                    </div>
+                                    <div className="answer-col">
+                                        <span className="label">正确答案</span>
+                                        <span className="val primary">{res.correctAnswer}</span>
+                                    </div>
+                                </div>
+                                {res.explanation && (
+                                    <div className="review-explanation">
+                                        <strong>解析：</strong>
+                                        {res.explanation}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
 
             <div className="assessment-actions">
               <button className="btn-secondary" onClick={onClose}>返回导图</button>
-              <button className="btn-primary" onClick={() => setStep('setup')}>再次测评</button>
+              <button className="btn-primary" onClick={() => setStep('setup')}>再次诊断</button>
             </div>
           </div>
         )}

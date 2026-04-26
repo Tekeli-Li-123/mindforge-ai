@@ -39,7 +39,7 @@ JSON 数组项格式：
   "correctAnswer": "正确项内容", // 非问答题必填
   "referenceAnswer": "参考标准答案", // 仅限问答题
   "explanation": "题目解析",
-  "difficulty": "${difficulty}"
+  "difficulty": "从 easy, medium, hard 中选择一个最贴切的描述"
 }`;
 
     const userMsg = `知识点：${node.content}\n背景：${node.explanation || '无'}\n路径：${contextPath}\n\n${count ? `请生成 ${count} 道题目：` : '请自主决定题目数量和题型并生成题目：'}`;
@@ -59,12 +59,37 @@ JSON 数组项格式：
         referenceAnswer: q.referenceAnswer,
         explanation: q.explanation,
         relatedNodeId: node.id,
-        difficulty: q.difficulty || difficulty,
+        difficulty: q.difficulty || 'medium',
       }));
     } catch (e) {
       console.error('Failed to generate batch:', rawJson);
       throw new Error('AI 生成题目失败，请重试。');
     }
+  }
+
+  /**
+   * 针对评估中的单道错误题目进行原地替换生成
+   */
+  static async regenerateQuestion(
+    node: MindMapNode,
+    contextPath: string,
+    previousQuestion: string,
+    customDifficulty: string,
+    allowedTypes: ('choice' | 'trueFalse' | 'openEnded')[]
+  ): Promise<QuizQuestion> {
+    const systemInstruction = `用户反馈上一道题目有误或不适用，请生成一道全新的替代题目。
+    【被反馈的旧题目】：${previousQuestion}
+    请确保新题目与旧题目完全不同，但仍保持同样的难度级别和知识点相关性。`;
+
+    const batch = await this.generateAssessmentBatch(
+      node,
+      contextPath,
+      `${customDifficulty}\n\n${systemInstruction}`,
+      1,
+      allowedTypes
+    );
+
+    return batch[0];
   }
 
   /**
