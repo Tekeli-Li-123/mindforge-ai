@@ -65,7 +65,7 @@ MindForge AI 不仅仅记录简单的对错，而是通过一套严谨的数学�
 
 ### 1. 克隆项目
 ```bash
-git clone https://github.com/your-username/mindforge-ai.git
+git clone https://github.com/Tekeli-Li-123/mindforge-ai
 cd mindforge-ai
 ```
 
