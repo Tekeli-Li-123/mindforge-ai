@@ -1,32 +1,160 @@
-export const DEFAULT_SYSTEM_PROMPT = 
-  "你是一个专业的学习规划与知识拆解助手。你的任务是根据用户提供的主题，生成一份结构化、详细、有逻辑深度的思维导图。\n" +
-  "请严格输出 Markdown 格式的标题结构（使用 #, ##, ### 等表示层级）。\n" +
-  "规则：\n" +
-  "1. 不要输出任何额外的闲聊解释文本，只严格返回构建节点的 Markdown 代码。\n" +
-  "2. 根节点使用且只使用一个 # 标题。\n" +
-  "3. 知识分支使用 ##、### 等。\n" +
-  "4. 深度最好控制在 3-5 级。确保涵盖核心知识点、前置基础、进阶应用。\n" +
-  "5. 必须返回纯 Markdown 文本，不要有代码块包裹。";
+/**
+ * @file Legado — 统一 Prompt 导出入口
+ *
+ * 本文件保持向后兼容，从新的版本化 prompt 目录重新导出。
+ * 新代码应直接使用 promptRegistry 的 getFilledPrompt 或 getPrompt。
+ *
+ * @see ./prompts/README.md
+ * @see ./prompts/promptRegistry.ts
+ */
 
-export const DEFAULT_REFINE_PROMPT =
-  "请围绕知识点 \"{{target}}\" 帮我细化和发散出具体的子节点。这个知识点所在的完整上下文路径是: {{context}}。\n" +
-  "要求：\n" +
-  "1. 只返回 \"{{target}}\" 的直接子节点及后续层级，以 Markdown 提供。\n" +
-  "2. {{limitInstruction}}\n" +
-  "3. 不要包含原节点本身作为统一根节点，如果有单个总览节点可以直接去掉。\n" +
-  "4. 极其重要：只返回 Markdown 列表，不要带任何寒暄、不要带代码块包裹标记、不要进行除了节点文本外的任何解释。";
+import { getFilledPrompt, getPrompt, type PromptMeta } from "./prompts/promptRegistry";
 
-export const DEFAULT_EXPLAIN_PROMPT =
-  "你是一位专业且耐心的导师。请为我详细解释知识点：\"{{target}}\"。\n" +
-  "它的背景结构路径（面包屑）是: {{context}}。\n" +
-  "请用简单易懂、富有启发性的语言进行解释，重点包含：\n" +
-  "1. 核心定义\n" +
-  "2. 为什么在当前这个语境/层级下它很重要？\n" +
-  "3. (可选) 一个生活化或直观的例子。\n" +
-  "要求：只输出解释内容本身，尽量言简意赅控制在 300 字内。不要带上“好的”、“没问题”类的寒暄和前言，直接开始解释。";
+/**
+ * 从 registry 获取最新版本的 system prompt
+ */
+export const DEFAULT_SYSTEM_PROMPT = (() => {
+  const result = getPrompt("system");
+  return result?.template ?? "";
+})();
 
-export const DEFAULT_REORGANIZE_PROMPT =
-  "请审视以下属于 \"{{context}}\" 父级概念下的一堆杂乱子节点。\n" +
-  "我需要你帮我找出内部的逻辑规律，重新梳理出清晰的层级树（不超过 2-3 个归类维度），消除重复项。\n" +
-  "极其重要：请直接给回按照逻辑归类的纯 Markdown 列表，要求最顶层必须是这些重新归类后的类别（不要再带上原来的顶层根节点名）。绝对不要包含解释文字和寒暄，不要用代码块包裹。\n" +
-  "原有的这些叶子节点内容：\n\n{{childrenMarkdown}}";
+/**
+ * 从 registry 获取最新版本的 refine prompt
+ */
+export const DEFAULT_REFINE_PROMPT = (() => {
+  const result = getPrompt("refine");
+  return result?.template ?? "";
+})();
+
+/**
+ * 从 registry 获取最新版本的 explain prompt
+ */
+export const DEFAULT_EXPLAIN_PROMPT = (() => {
+  const result = getPrompt("explain");
+  return result?.template ?? "";
+})();
+
+/**
+ * 从 registry 获取最新版本的 reorganize prompt
+ */
+export const DEFAULT_REORGANIZE_PROMPT = (() => {
+  const result = getPrompt("reorganize");
+  return result?.template ?? "";
+})();
+
+/**
+ * 从 registry 获取最新版本的 assessment prompt
+ */
+export const DEFAULT_ASSESSMENT_PROMPT = (() => {
+  const result = getPrompt("assessment");
+  return result?.template ?? "";
+})();
+
+// ============ 便捷填充函数（向后兼容） ============
+
+/**
+ * 填充 system prompt（向后兼容）
+ * @deprecated 请直接使用 getFilledPrompt('system', variables)
+ */
+export function fillSystemPrompt(topic: string, title?: string, description?: string): string {
+  return (
+    getFilledPrompt("system", {
+      topic: topic || "",
+      title: title || "",
+      description: description || "",
+    })?.text ?? DEFAULT_SYSTEM_PROMPT
+  );
+}
+
+/**
+ * 填充 refine prompt（向后兼容）
+ * @deprecated 请直接使用 getFilledPrompt('refine', variables)
+ */
+export function fillRefinePrompt(
+  target: string,
+  context: string,
+  limitInstruction?: string,
+): string {
+  return (
+    getFilledPrompt(
+      "refine",
+      {
+        target,
+        context,
+        limitInstruction: limitInstruction || "请生成 3-5 个子节点",
+      },
+      { includeFewShot: true, fewShotCount: 1 },
+    )?.text ?? ""
+  );
+}
+
+/**
+ * 填充 explain prompt（向后兼容）
+ * @deprecated 请直接使用 getFilledPrompt('explain', variables)
+ */
+export function fillExplainPrompt(target: string, context: string): string {
+  return (
+    getFilledPrompt(
+      "explain",
+      {
+        target,
+        context,
+      },
+      { includeFewShot: true, fewShotCount: 1 },
+    )?.text ?? ""
+  );
+}
+
+/**
+ * 填充 reorganize prompt（向后兼容）
+ * @deprecated 请直接使用 getFilledPrompt('reorganize', variables)
+ */
+export function fillReorganizePrompt(context: string, childrenMarkdown: string): string {
+  return (
+    getFilledPrompt(
+      "reorganize",
+      {
+        context,
+        childrenMarkdown,
+      },
+      { includeFewShot: true, fewShotCount: 1 },
+    )?.text ?? ""
+  );
+}
+
+// ============ 重新导出 Registry 中所有公开 API ============
+
+export {
+  getPrompt,
+  getPromptByAlias,
+  getFilledPrompt,
+  fillTemplate,
+  hasVersion,
+  listVersions,
+  getRegisteredCategories,
+  registerPrompt,
+  registerAlias,
+} from "./prompts/promptRegistry";
+
+export type { PromptMeta, PromptEntry, PromptResult } from "./prompts/promptRegistry";
+
+// ============ 重新导出 Evaluator API ============
+
+export {
+  evaluateTestCase,
+  evaluatePrompt,
+  checkTemplateRendering,
+} from "./prompts/promptEvaluator";
+
+export type { TestCase, EvaluationResult, PromptEvaluation } from "./prompts/promptEvaluator";
+
+// ============ 重新导出 Few-shot API ============
+
+export {
+  getExamplesByCategory,
+  getExamplesByTag,
+  getTopKExamples,
+  formatExamplesAsContext,
+} from "./prompts/fewShotExamples";
+
+export type { FewShotExample } from "./prompts/fewShotExamples";

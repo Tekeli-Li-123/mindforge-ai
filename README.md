@@ -1,106 +1,439 @@
+<div align="center">
+
 # MindForge AI 🧠
 
-> **AI 驱动的交互式思维导图学习助手**
-> 
-> *不仅仅是绘图，更是你的智能学习协作者。*
+**AI-powered interactive mind map learning assistant**
 
-![MindForge AI](https://img.shields.io/badge/Status-Development-orange?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
-![React](https://img.shields.io/badge/Built%20with-React-61DAFB?style=flat-square&logo=react)
-![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite)
+_Not just a diagram tool — your intelligent learning collaborator._
 
-MindForge AI 是一款深度集成大语言模型（LLM）的思维导图工具。它将传统的思维导图与强大的上下文感知能力相结合，让您能以“对话”的形式构建知识图谱、深化概念理解、并自动生成结构化的学习笔记。
+<br />
 
-## ✨ 核心特性
+[![Status](https://img.shields.io/badge/Status-Development-orange?style=flat-square)]()
+[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+[![React](https://img.shields.io/badge/Frontend-React_18-61DAFB?style=flat-square&logo=react)]()
+[![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?style=flat-square&logo=typescript)]()
+[![Node](https://img.shields.io/badge/Backend-Node_22-339933?style=flat-square&logo=nodedotjs)]()
+[![Tests](https://img.shields.io/badge/Tests-208_passing-brightgreen?style=flat-square)]()
+[![Code Style](https://img.shields.io/badge/Code_Style-Prettier-FF69B4?style=flat-square)]()
 
-### 1. ⚡ 全链路流式响应与动态渲染 (Streaming & Dynamic Generation)
-- **SSE 流式传输**：彻底告别长连接等待，毫秒级流式接收 AI 推理与生成内容。
-- **动态导图生长**：突破传统的阻塞式生成。利用节流算法，在 AI 输出的瞬间，导图节点如生命体般在画布上逐一“长出”。
-- **可视化思考引擎 (Reasoning Overlay)**：针对 DeepSeek-R1 / Claude 3.7 等支持深度思考的模型，提供悬浮式“思维追踪器”，实时展现万字级别的深度推理链。
+</div>
 
-### 2. 🤖 协作式 AI 技能系统 (Modular Skill System)
-- **指令分发机制**：插件化的技能架构，AI 可自动调用 `ADD_NODE`、`DELETE_NODE`、`RENAME_NODE` 等技能实时操作导图。
-- **知识沉淀 (SAVE_EXPLAIN)**：AI 可将深度的概念解释直接同步到节点的元数据中，点击节点即可查看。
-- **动态掌握度 (UPDATE_MASTERY)**：内置认知评估技能，根据对话表现实时计算并更新用户对每个知识点的掌握百分比。
-
-### 2. 🧠 智能记忆引擎 (Intelligent Memory Engine)
-- **对话压缩技术**：内置启发式 Token 估算与自动总结机制，有效应对长对话下的上下文窗口限制。
-- **核心见解提取 (MEMORY_FLUSH)**：支持手动或自动触发的记忆整理，从杂乱的对话中提取事实 (Facts) 并转为长期记忆。
-
-### 3. 📖 深度概念细化与重组
-- **一键细化 (AI Refine)**：基于递归路径感知，自动为核心概念发散出分一层的科学分类。
-- **智能重组 (Reorganize)**：一键调用 AI 重新梳理混乱的分支结构，优化知识层级。
-- **个性化人设**：支持项目级 AI Persona 配置，让 AI 以特定身份辅助学习。
-
-### 4. 🎯 自适应 AI 知识诊断系统 (Adaptive Assessment)
-- **多维度测评会话**：整合“问答、单选、判断”三种题型，通过顺序化、人设化的诊断流深度剖析知识盲区。
-- **自定义 AI 考官 (Persona)**：支持用户自定义诊断深度与人设（如“面试官模式”、“基础教学模式”），由 AI 动态优化指令质量。
-- **自适应反馈流**：每道题后实时展示诊断解析、正确性判定以及针对性的学习建议。
-
-#### 🔬 核心评估算法：贝叶斯认知追踪 (Bayesian Cognitive Tracking)
-MindForge AI 不仅仅记录简单的对错，而是通过一套严谨的数学模型动态演化您的认知画像：
-- **Beta-Bernoulli 共轭先验**：系统将每个知识点的掌握度模拟为 Beta 分布。初始状态设定为深层怀疑先验（$5\%$ Mastery），通过每一次答题行为进行后验概率更新。
-- **四维认知证据模型**：AI 会从四个维度量化用户的回答：
-    - **核心记忆 (Recall)**：能否准确提取定义、术语与核心事实。
-    - **概念理解 (Comprehension)**：能否解释核心逻辑与原理。
-    - **知识应用 (Application)**：能否在实际场景中运用该知识点。
-    - **深度分析 (Analysis)**：能否进行跨知识点的对比与边界分析。
-- **语义逻辑匹配**：内置语义映射层，自动识别并兼容多种表达（如 `True/正确/对/1`），确保诊断不受字面匹配限制。
-
-### 5. 🎨 极致的交互体验 (Premium UX)
-- **诊断复盘报告**：测评结束后生成详尽的“深度诊断报告”，包含四维评分条与 AI 汇总建议。
-- **掌握度热力可视化**：节点背景进度条随贝叶斯期望值动态变化（红-黄-绿渐变），直观呈现“知识热力图”。
-- **高性能渲染**：基于 D3.js 的矢量引擎，支持海量节点平滑缩放与毛玻璃动效切换。
-
-## 🛠️ 技术栈
-
-- **Frontend**: React 18 / TypeScript / Vite
-- **Cognitive Engine**: Bayesian Inference Logic / Beta Distribution Modeling
-- **Styling**: Vanilla CSS (Glassmorphism / Neon Gradients)
-- **State**: Zustand (Atomic State Management)
-- **Rendering**: Markmap / D3.js (SVG-based)
-- **LLM API**: OpenAI-Compatible API Layer
-
-## 🚀 快速上手
-
-### 1. 克隆项目
-```bash
-git clone https://github.com/Tekeli-Li-123/mindforge-ai
-cd mindforge-ai
-```
-
-### 2. 安装依赖
-```bash
-npm install
-```
-
-### 3. 配置 API
-1. 启动项目：`npm run dev`
-2. 进入应用后，点击左侧导航栏底部的 **“设置”** 按钮。
-3. 配置您的 `OpenAI API Key` 或 `Local LLM Base URL`。
-
-### 4. 开始创作
-点击 **“新建项目”**，输入主题，让 AI 为您开启知识探索之旅。
-
-## 🗺️ 路线图 (Roadmap)
-
-- [x] **AI 考核系统**：基于导图内容自动生成练习题与测评结果分析，采用贝叶斯更新。
-- [x] **掌握度热力图**：通过节点背景颜色的智能渐变，实时反馈知识点的掌握度情况。
-- [x] **导出增强**：支持无缝导出为高清图片 (.png)、标准 Markdown (.md) 及 JSON 结构数据。
-- [x] **多平台大模型兼容**：深度兼容 OpenAI 格式与 Anthropic 原生 API 格式，完美支持 DeepSeek-R1、Claude 等思考型模型。
-- [ ] **全局云端同步**：打通多端数据同步体验。
-- [ ] **多模态学习支持**：允许导入 PDF / 文档资料作为核心概念进行导图化提取。
-
-## 🤝 鸣谢 (Acknowledgements)
-
-本项目深受以下开源项目的启发与支持：
-- **[Markmap](https://markmap.js.org/)**: 强大的思维导图可视化引擎。
-- **[Lucide](https://lucide.dev/)**: 极简风格的图标库。
-- **[Zustand](https://github.com/pmndrs/zustand)**: 现代化的 React 状态管理方案。
-- **[React Markdown](https://github.com/remarkjs/react-markdown)**: 灵活的 Markdown 渲染组件。
-
-## 📄 开源协议
-[MIT License](LICENSE)
+**English** · [中文](README.zh-CN.md)
 
 ---
-*Created with ❤️ by MindForge Team. Explore the future of learning.*
+
+## Table of Contents
+
+- [Overview](#-overview)
+- [Why MindForge AI?](#-why-mindforge-ai)
+- [Features](#-features)
+  - [Streaming & Dynamic Rendering](#-streaming--dynamic-rendering)
+  - [Collaborative AI Skill System](#-collaborative-ai-skill-system)
+  - [Intelligent Memory Engine](#-intelligent-memory-engine)
+  - [Bayesian Cognitive Tracking](#-bayesian-cognitive-tracking)
+  - [Adaptive Assessment](#-adaptive-assessment)
+- [Project Architecture](#-project-architecture)
+- [Tech Stack](#-tech-stack)
+- [Quick Start](#-quick-start)
+  - [Frontend Only](#frontend-only)
+  - [Full Stack (Local)](#full-stack-local)
+  - [Docker (Production)](#docker-production)
+- [API Endpoints](#-api-endpoints)
+- [Testing](#-testing)
+- [Project Structure](#-project-structure)
+- [Roadmap](#-roadmap)
+- [License](#-license)
+
+---
+
+## 💡 Overview
+
+**MindForge AI** reimagines mind mapping by fusing it with large language models (LLMs). Instead of manually dragging and typing nodes, you **converse with your mind map** — AI listens, understands, and acts on your intent in real time.
+
+**The core idea**: Traditional mind map tools are _passive canvases_ — you draw, they store. MindForge AI is an _active collaborator_ — it participates in structuring your knowledge, identifying gaps in your understanding, and helping you learn more effectively.
+
+### What makes it different?
+
+| Aspect            | Traditional Mind Maps         | MindForge AI                                            |
+| ----------------- | ----------------------------- | ------------------------------------------------------- |
+| **Creation**      | Manually add nodes one by one | Describe what you want → AI generates the tree          |
+| **Understanding** | You review static content     | AI quizzes you and tracks mastery per concept           |
+| **Memory**        | Saved as a file               | RAG pipeline retrieves relevant context across sessions |
+| **Assessment**    | None (just a diagram)         | Bayesian cognitive model updates after each answer      |
+| **Interaction**   | Click + type                  | Chat naturally with the map                             |
+
+**Real-world use cases**:
+
+- 🎓 **Students & self-learners**: Build a knowledge map of any subject → let AI quiz you on weak areas → track mastery over time
+- 📚 **Researchers**: Import papers as mind maps → refine branches with AI → assess your understanding of complex topics
+- 🏢 **Teams**: Collaborate on project knowledge bases → AI summarizes decisions and extracts key facts → persist insights across meetings
+- 🧑‍🏫 **Educators**: Create interactive learning materials → students explore concepts conversationally → get automatic assessment reports
+
+---
+
+## 🤔 Why MindForge AI?
+
+Most AI-powered learning tools fall into two categories:
+
+1. **Chatbots** (ChatGPT, Claude) — Great for answering questions, but the knowledge is ephemeral. There's no structure, no persistence, no way to visualize what you know and don't know.
+2. **Flashcard / Spaced Repetition apps** (Anki, Quizlet) — Great for memorization, but they don't _understand_ the content. They test recall, not comprehension.
+
+**MindForge AI bridges the gap**: It combines the conversational depth of LLMs with the structural clarity of mind maps, powered by cognitive science (Bayesian inference) and information retrieval (RAG). The result is a learning system that:
+
+- **Organizes** knowledge hierarchically (mind map structure)
+- **Evaluates** understanding continuously (Bayesian mastery model)
+- **Persists** insights across sessions (RAG memory)
+- **Adapts** to each learner's pace and gaps (AI-driven assessment)
+
+---
+
+## ✨ Features
+
+### ⚡ Streaming & Dynamic Rendering
+
+| Capability              | Description                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **SSE Streaming**       | Millisecond-latency streaming of AI reasoning via Server-Sent Events. No more blocking waits — responses appear character by character.  |
+| **Dynamic Node Growth** | AI-generated nodes appear on the canvas one-by-one as they are streamed, using a throttle algorithm for smooth, animated expansion.      |
+| **Reasoning Overlay**   | For DeepSeek-R1 / Claude 3.7 thinking models, a floating "thought tracker" transparently shows the model's reasoning chain in real time. |
+
+### 🤖 Collaborative AI Skill System
+
+| Capability                | Description                                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Instruction Dispatch**  | Plugin-based skill architecture — AI autonomously calls `ADD_NODE`, `DELETE_NODE`, `RENAME_NODE`, etc. to manipulate the map on your behalf. |
+| **Knowledge Persistence** | `SAVE_EXPLAIN` skill writes deep concept explanations directly into node metadata. Tap any node to view them.                                |
+| **Dynamic Mastery**       | `UPDATE_MASTERY` skill evaluates dialogue interactions and updates per-concept mastery percentages in real time using Bayesian inference.    |
+
+### 🧠 Intelligent Memory Engine
+
+| Capability                   | Description                                                                                                                         |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Conversation Compression** | Heuristic token estimation + automatic summarization to overcome context window limits in long dialogues.                           |
+| **Core Insight Extraction**  | `MEMORY_FLUSH` extracts facts from chaotic conversations and promotes them to long-term memory.                                     |
+| **RAG Semantic Retrieval**   | Full RAG pipeline (chunk → embed → index → retrieve → inject) surfaces relevant historical context into AI prompts across sessions. |
+
+### 🔬 Bayesian Cognitive Tracking
+
+MindForge AI models knowledge mastery as a **Beta-Bernoulli conjugate prior**:
+
+- **Initial state**: Deep skepticism prior (~5% mastery per concept). The system _assumes_ you don't know, and requires evidence to become confident.
+- **Evidence model**: After each answer (quiz, dialogue, or task), AI evaluates across **4 cognitive dimensions**:
+  - **Recall** — Can you accurately retrieve definitions and core facts?
+  - **Comprehension** — Can you explain the underlying logic and principles?
+  - **Application** — Can you apply the knowledge in practical scenarios?
+  - **Analysis** — Can you compare, contrast, and reason across knowledge boundaries?
+- **Update mechanism**: Each dimension generates evidence that updates the Beta distribution's α/β parameters. After enough evidence, the expected value converges to the true mastery level.
+- **Semantic matching layer**: Normalizes diverse expressions (`True` / `正确` / `对` / `1`) to avoid literal-matching bias.
+- **Result**: A dynamically updating "knowledge heatmap" — node background colors shift from 🔴 red (low mastery) → 🟡 yellow (medium) → 🟢 green (high), giving you an instant visual of your strengths and blind spots.
+
+### 🎯 Adaptive Assessment
+
+| Capability                   | Description                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Multi-format Quiz**        | Multiple choice, true/false, fill-in-the-blank, short answer, and coding questions — all generated from your mind map content. |
+| **Custom AI Examiner**       | Choose a persona ("Interviewer", "Tutor", "Professor") — the AI dynamically tailors question difficulty, style, and depth.     |
+| **Post-Quiz Report**         | After each session, a detailed diagnostic report with 4-dimensional score bars and AI-synthesized learning recommendations.    |
+| **Untested Concepts Filter** | Automatically filter to quiz only the concepts with low or no mastery data — efficient spaced learning.                        |
+
+---
+
+## 🏗 Project Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│                   Browser                         │
+│  ┌────────────────────────────────────────────┐   │
+│  │  React SPA (Vite)                          │   │
+│  │  ┌──────┐ ┌──────────┐ ┌───────────────┐  │   │
+│  │  │ Chat │ │ Mind Map │ │ Assessment    │  │   │
+│  │  └──┬───┘ └────┬─────┘ └───────┬───────┘  │   │
+│  │     │           │               │           │   │
+│  │  ┌──┴───────────┴───────────────┴───────┐  │   │
+│  │  │      Zustand Stores                  │  │   │
+│  │  │  (settings, mindmap, memory)          │  │   │
+│  │  └──────────────────────────────────────┘  │   │
+│  └─────────────────────┬──────────────────────┘   │
+└────────────────────────┼──────────────────────────┘
+                         │ HTTP / SSE
+┌────────────────────────┼──────────────────────────┐
+│              Nginx Reverse Proxy                   │
+│              (port 80 → /api → backend)            │
+└────────────────────────┼──────────────────────────┘
+                         │
+┌────────────────────────┼──────────────────────────┐
+│  Express Server (port 3001)                        │
+│  ┌───────────┐ ┌────────────┐ ┌────────────────┐  │
+│  │ REST API  │ │ AI Proxy   │ │ RAG Pipeline   │  │
+│  │ (CRUD)    │ │ (4 vendors)│ │ (5 services)   │  │
+│  └─────┬─────┘ └────────────┘ └───────┬────────┘  │
+│        │                               │           │
+│  ┌─────┴───────────────────────────────┴──────┐   │
+│  │         SQLite (via better-sqlite3)        │   │
+│  │         Persistent Volume (Docker)         │   │
+│  └────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────┘
+
+
+### Data Flow
+
+1. **User creates/edits a mind map** → changes are synced to Zustand stores → persisted via REST API to SQLite
+2. **User chats with AI** → message sent to AI proxy → streaming response → AI calls skills (`ADD_NODE`, etc.) → map updates in real time
+3. **User takes a quiz** → questions generated from map nodes → answers evaluated → Bayesian mastery updated → heatmap re-renders
+4. **Across sessions** → RAG pipeline embeds map nodes + memories + chat history → semantic search retrieves relevant context on next interaction
+```
+
+---
+
+## 🛠 Tech Stack
+
+| Layer                  | Technology                                                    |
+| ---------------------- | ------------------------------------------------------------- |
+| **Frontend Framework** | React 18, TypeScript, Vite                                    |
+| **State Management**   | Zustand (persisted to localStorage)                           |
+| **Mind Map Rendering** | Markmap (D3.js / SVG-based)                                   |
+| **Styling**            | Vanilla CSS (Glassmorphism + Neon Gradients)                  |
+| **Backend Runtime**    | Node.js 22, Express                                           |
+| **Database**           | SQLite via better-sqlite3                                     |
+| **Authentication**     | Bearer Token (middleware)                                     |
+| **LLM Integration**    | OpenAI SDK, Anthropic SDK, DeepSeek API, Ollama/LM Studio     |
+| **AI Proxy**           | Server-side proxy hides API keys from client                  |
+| **Embeddings**         | OpenAI `text-embedding-3-small`, Local (Ollama)               |
+| **Vector Search**      | In-memory cosine similarity + L2 distance                     |
+| **Text Chunking**      | Sentence-aware splitting (Chinese + English)                  |
+| **Testing**            | Vitest, jsdom (208 test cases, zero failures)                 |
+| **Code Quality**       | ESLint v10 flat config, Prettier, Husky, lint-staged          |
+| **CI/CD**              | GitHub Actions (push/PR → lint → format check → test → build) |
+| **Containerization**   | Docker, Docker Compose                                        |
+
+---
+
+## 🚀 Quick Start
+
+### Frontend Only
+
+```bash
+# 1. Clone
+git clone https://github.com/your-username/mindforge-ai.git
+cd mindforge-ai
+
+# 2. Install
+npm install
+
+# 3. Start dev server (port 5173)
+npm run dev
+```
+
+Open `http://localhost:5173`. Configure an API Key in **Settings** → the app will use it to call LLMs directly from your browser.
+
+### Full Stack (Local)
+
+```bash
+# Terminal 1 — Frontend
+npm install && npm run dev
+
+# Terminal 2 — Backend
+cd server
+npm install
+cp .env.example .env   # Fill in your API keys
+npm run dev            # Starts on port 3001
+```
+
+The backend provides AI proxy (so the frontend never sees API keys), persistent storage, and the RAG pipeline. The frontend dev server proxies `/api/*` to `localhost:3001`.
+
+### Docker (Production)
+
+```bash
+# Build & start all services
+docker compose up --build
+
+# Or run in background
+docker compose up -d --build
+
+# Access at http://localhost:80
+```
+
+**What's included**:
+| Component | Port | Role |
+|-----------|------|------|
+| **Nginx** | 80 | Serves the built SPA, gzip, static caching, proxies `/api/*` |
+| **Express** | 3001 | REST API + AI proxy + RAG pipeline |
+| **SQLite** | — | Persisted via Docker named volume (`mindforge-data`) |
+
+**Environment variables** (pass via `-e` or `.env`):
+
+```bash
+OPENAI_API_KEY=sk-...       # Optional (only if using OpenAI)
+ANTHROPIC_API_KEY=sk-ant-... # Optional (only if using Anthropic)
+DEEPSEEK_API_KEY=sk-...     # Optional (only if using DeepSeek)
+```
+
+The backend health check runs every 30s: `GET /api/rag/stats/dummy`.
+
+---
+
+## 📡 API Endpoints
+
+### Project Management
+
+| Method   | Path                | Description          |
+| -------- | ------------------- | -------------------- |
+| `GET`    | `/api/projects`     | List all projects    |
+| `POST`   | `/api/projects`     | Create a new project |
+| `PUT`    | `/api/projects/:id` | Update a project     |
+| `DELETE` | `/api/projects/:id` | Delete a project     |
+
+### Memory & Chat
+
+| Method   | Path                       | Description                 |
+| -------- | -------------------------- | --------------------------- |
+| `GET`    | `/api/memories/:projectId` | List memories for a project |
+| `POST`   | `/api/memories/:projectId` | Create a memory             |
+| `DELETE` | `/api/memories/:id`        | Delete a memory             |
+| `GET`    | `/api/chat/:projectId`     | Get chat history            |
+| `POST`   | `/api/chat/:projectId`     | Append to chat history      |
+
+### AI Proxy
+
+| Method | Path                | Description                           |
+| ------ | ------------------- | ------------------------------------- |
+| `POST` | `/api/ai/openai`    | Proxy to OpenAI API                   |
+| `POST` | `/api/ai/anthropic` | Proxy to Anthropic API                |
+| `POST` | `/api/ai/deepseek`  | Proxy to DeepSeek API                 |
+| `POST` | `/api/ai/local`     | Proxy to local LLM (Ollama/LM Studio) |
+
+### RAG
+
+| Method | Path                                  | Description                                          |
+| ------ | ------------------------------------- | ---------------------------------------------------- |
+| `POST` | `/api/rag/reindex/:projectId`         | Full reindex (mind map + memories + chat)            |
+| `POST` | `/api/rag/query/:projectId`           | Semantic search (returns chunks + relevance scores)  |
+| `POST` | `/api/rag/query-formatted/:projectId` | Search + format as system prompt context             |
+| `GET`  | `/api/rag/stats/:projectId`           | Index statistics (total chunks, source distribution) |
+| `POST` | `/api/rag/remove/:projectId`          | Delete index for a specific source                   |
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode
+npm test -- --watch
+
+# With coverage
+npx vitest run --coverage
+open coverage/index.html
+```
+
+**Current status**: 9 test files · **208 test cases · 100% passing**.
+
+| Test File                   | Cases | Module                                             |
+| --------------------------- | ----- | -------------------------------------------------- |
+| `bayesianEngine.test.ts`    | 16    | Cognitive engine (Beta-Bernoulli inference)        |
+| `mindmapHelpers.test.ts`    | 30    | Node operations, path finding, duplicate detection |
+| `settingsStore.test.ts`     | 24    | Zustand store with localStorage persistence        |
+| `mindmapStore.test.ts`      | 38    | Full CRUD, expand/collapse, code generation        |
+| `aiService.test.ts`         | 25    | AI service (streaming, error handling)             |
+| `assessmentService.test.ts` | 14    | Question generation, JSON parsing                  |
+| `memoryService.test.ts`     | 16    | Token estimation, conversation compression         |
+| `modelCapabilities.test.ts` | 23    | Model rules engine (reasoning model detection)     |
+| `promptEvaluator.test.ts`   | 19    | Prompt quality evaluation                          |
+
+---
+
+## 📁 Project Structure
+
+```
+mindforge-ai/
+├── .github/workflows/
+│   └── ci.yml                     # CI pipeline (lint → format → test → build)
+├── docs/
+│   ├── IMPROVEMENT_ROADMAP.md     # Detailed improvement roadmap
+│   └── TEST_FLOW.md               # Testing guide & manual test procedures
+├── server/                        # Express + SQLite backend
+│   ├── src/
+│   │   ├── db/                    # Schema, init, repository, RAG repository
+│   │   ├── middleware/            # Bearer token auth
+│   │   ├── routes/                # Projects, memories, chat, AI proxy, RAG
+│   │   └── services/              # Memory service, RAG pipeline (5 services)
+│   ├── Dockerfile
+│   ├── .env.example
+│   └── package.json
+├── src/                           # Frontend source
+│   ├── __tests__/                 # 9 test files (208 cases)
+│   ├── components/                # React components
+│   │   ├── Chat/                  # ChatPanel (streaming UI)
+│   │   ├── MindMap/               # MindMapView (D3.js canvas)
+│   │   └── Assessment/            # AssessmentModal (quiz UI)
+│   ├── config/
+│   │   ├── prompts/               # Modular prompt engineering (6 files)
+│   │   ├── modelCapabilities.ts   # Model capability rules engine
+│   │   └── promptEvaluator.ts     # Prompt quality evaluation
+│   ├── pages/                     # Dashboard, MapEditor, Quiz, Settings
+│   ├── services/                  # AI, assessment, memory services
+│   ├── stores/                    # Zustand stores (settings, mindmap, memory)
+│   ├── types/                     # TypeScript type definitions
+│   └── utils/                     # Mind map helpers, Bayesian engine
+├── Dockerfile                     # Frontend multi-stage build
+├── docker-compose.yml             # Full-stack Docker orchestration
+├── nginx.conf                     # Reverse proxy config
+├── eslint.config.js               # ESLint v10 flat config
+├── .prettierrc                    # Formatter config
+├── .husky/pre-commit              # lint-staged hook
+├── vitest.config.ts               # Test runner config
+└── package.json
+```
+
+---
+
+## 🗺 Roadmap
+
+See the full [improvement roadmap](docs/IMPROVEMENT_ROADMAP.md) for details.
+
+### Completed ✅
+
+**Frontend Infrastructure**
+
+- [x] Unit test suite (208 cases across 9 files, 100% passing)
+- [x] ESLint + Prettier + Husky + lint-staged (zero errors)
+- [x] CI (GitHub Actions — lint → format check → test → build)
+- [x] Quiz page rewrite (5 question types + AI scoring + mastery report)
+
+**AI & Prompt Engineering**
+
+- [x] Model capabilities rules engine (auto-adapts to reasoning models)
+- [x] Modular prompt engineering system (versioned prompts + evaluator)
+- [x] Bayesian cognitive tracking (Beta-Bernoulli mastery model)
+
+**Backend & Data**
+
+- [x] Express + SQLite persistence (projects, memories, chat)
+- [x] AI proxy (API key safety, 4 vendor support)
+- [x] RAG pipeline (chunk → embed → vector search → context injection)
+- [x] Docker containerization (frontend + backend + nginx + compose)
+
+### Upcoming 📋
+
+- [ ] Multimodal support (image / PDF / audio)
+- [ ] PWA + offline support (Service Worker + IndexedDB)
+- [ ] Token usage monitoring dashboard
+- [ ] Additional test coverage (edge cases, integration, E2E)
+
+---
+
+## 📄 License
+
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ by the MindForge Team.</sub>
+  <br />
+  <sub>Explore the future of learning.</sub>
+  <br />
+  <sub><a href="README.zh-CN.md">🇨🇳 中文版本</a></sub>
+</p>

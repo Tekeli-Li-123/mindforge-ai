@@ -1,5 +1,5 @@
-import { fetchFromAI } from './aiService';
-import type { LLMEvidence, QuizQuestion, MindMapNode } from '../types';
+import { fetchFromAI } from "./aiService";
+import type { LLMEvidence, QuizQuestion, MindMapNode } from "../types";
 
 /**
  * 智能自适应考核服务
@@ -11,20 +11,20 @@ export class AssessmentService {
   static async generateAssessmentBatch(
     node: MindMapNode,
     contextPath: string,
-    customDifficulty: string = '进阶水平：侧重概念的理解与简单应用。',
+    customDifficulty: string = "进阶水平：侧重概念的理解与简单应用。",
     count: number = 3,
-    allowedTypes: ('choice' | 'trueFalse' | 'openEnded')[] = ['openEnded']
+    allowedTypes: ("choice" | "trueFalse" | "openEnded")[] = ["openEnded"],
   ): Promise<QuizQuestion[]> {
     const typeDesc = {
-      choice: '单选题 (choice)：提供 4 个选项，1 个正确答案。',
-      trueFalse: '判断题 (trueFalse)：判断表述正误。',
-      openEnded: '问答题 (openEnded)：开放式回答，考查深度理解。'
+      choice: "单选题 (choice)：提供 4 个选项，1 个正确答案。",
+      trueFalse: "判断题 (trueFalse)：判断表述正误。",
+      openEnded: "问答题 (openEnded)：开放式回答，考查深度理解。",
     };
 
     const systemMsg = `你是一个专业的教育评估专家。
     
 【诊断人设/要求】：${customDifficulty}
-允许题型：${allowedTypes && allowedTypes.length > 0 ? allowedTypes.map(t => typeDesc[t]).join('；') : '由你根据知识点特性决定 (单选/判断/问答) '}
+允许题型：${allowedTypes && allowedTypes.length > 0 ? allowedTypes.map((t) => typeDesc[t]).join("；") : "由你根据知识点特性决定 (单选/判断/问答) "}
 
 【规则】：
 1. 如果未指定固定题目数量，请根据知识点深度自行决定生成 2-5 道题。
@@ -42,28 +42,31 @@ JSON 数组项格式：
   "difficulty": "从 easy, medium, hard 中选择一个最贴切的描述"
 }`;
 
-    const userMsg = `知识点：${node.content}\n背景：${node.explanation || '无'}\n路径：${contextPath}\n\n${count ? `请生成 ${count} 道题目：` : '请自主决定题目数量和题型并生成题目：'}`;
+    const userMsg = `知识点：${node.content}\n背景：${node.explanation || "无"}\n路径：${contextPath}\n\n${count ? `请生成 ${count} 道题目：` : "请自主决定题目数量和题型并生成题目："}`;
 
     const rawJson = await fetchFromAI(systemMsg, userMsg);
     try {
-      const cleanJson = rawJson.replace(/```json\n?/, '').replace(/```/, '').trim();
+      const cleanJson = rawJson
+        .replace(/```json\n?/, "")
+        .replace(/```/, "")
+        .trim();
       const parsed = JSON.parse(cleanJson);
       const results = Array.isArray(parsed) ? parsed : [parsed];
-      
+
       return results.map((q, index) => ({
         id: `q-${Date.now()}-${index}`,
-        type: q.type || 'openEnded',
+        type: q.type || "openEnded",
         question: q.question,
         options: q.options,
         correctAnswer: q.correctAnswer,
         referenceAnswer: q.referenceAnswer,
         explanation: q.explanation,
         relatedNodeId: node.id,
-        difficulty: q.difficulty || 'medium',
+        difficulty: q.difficulty || "medium",
       }));
     } catch (e) {
-      console.error('Failed to generate batch:', rawJson);
-      throw new Error('AI 生成题目失败，请重试。');
+      console.error("Failed to generate batch:", rawJson);
+      throw new Error("AI 生成题目失败，请重试。", { cause: e });
     }
   }
 
@@ -75,7 +78,7 @@ JSON 数组项格式：
     contextPath: string,
     previousQuestion: string,
     customDifficulty: string,
-    allowedTypes: ('choice' | 'trueFalse' | 'openEnded')[]
+    allowedTypes: ("choice" | "trueFalse" | "openEnded")[],
   ): Promise<QuizQuestion> {
     const systemInstruction = `用户反馈上一道题目有误或不适用，请生成一道全新的替代题目。
     【被反馈的旧题目】：${previousQuestion}
@@ -86,7 +89,7 @@ JSON 数组项格式：
       contextPath,
       `${customDifficulty}\n\n${systemInstruction}`,
       1,
-      allowedTypes
+      allowedTypes,
     );
 
     return batch[0];
@@ -98,9 +101,11 @@ JSON 数组项格式：
   static async generateAssessmentQuestion(
     node: MindMapNode,
     contextPath: string,
-    difficulty: 'easy' | 'medium' | 'hard' = 'medium'
+    difficulty: "easy" | "medium" | "hard" = "medium",
   ): Promise<QuizQuestion> {
-    const batch = await this.generateAssessmentBatch(node, contextPath, difficulty, 1, ['openEnded']);
+    const batch = await this.generateAssessmentBatch(node, contextPath, difficulty, 1, [
+      "openEnded",
+    ]);
     return batch[0];
   }
 
@@ -112,7 +117,7 @@ JSON 数组项格式：
     nodeDefinition: string,
     question: string,
     referenceAnswer: string,
-    userAnswer: string
+    userAnswer: string,
   ): Promise<LLMEvidence> {
     const systemMsg = `你是一个严格的认知诊断专家。请根据用户的回答，评估其在知识点“${nodeName}”上的表现。
 
@@ -136,31 +141,35 @@ JSON 字段要求：
 
     const rawJson = await fetchFromAI(systemMsg, userMsg);
     try {
-      const cleanJson = rawJson.replace(/```json\n?/, '').replace(/```/, '').trim();
+      const cleanJson = rawJson
+        .replace(/```json\n?/, "")
+        .replace(/```/, "")
+        .trim();
       const parsed = JSON.parse(cleanJson);
-      
-      const clamp = (val: any) => Math.min(1, Math.max(0, typeof val === 'number' ? val : parseFloat(val) || 0));
+
+      const clamp = (val: any) =>
+        Math.min(1, Math.max(0, typeof val === "number" ? val : parseFloat(val) || 0));
 
       return {
         recall: clamp(parsed.recall),
         comprehension: clamp(parsed.comprehension),
         application: clamp(parsed.application),
         analysis: clamp(parsed.analysis),
-        feedback: parsed.feedback || '感谢你的作答。',
-        errorType: parsed.errorType || 'none',
-        suggestion: parsed.suggestion || '建议继续深入学习。',
+        feedback: parsed.feedback || "感谢你的作答。",
+        errorType: parsed.errorType || "none",
+        suggestion: parsed.suggestion || "建议继续深入学习。",
       };
     } catch (e) {
-      console.error('Failed to extract evidence:', rawJson);
+      console.error("Failed to extract evidence:", rawJson);
       // 降级处理：返回中立证据
       return {
         recall: 0.5,
         comprehension: 0.5,
         application: 0.5,
         analysis: 0.5,
-        feedback: '系统解析评估结果时出现异常，已记录中立表现。',
-        errorType: 'none',
-        suggestion: '请尝试重新组织语言作答或检查网络状态。',
+        feedback: "系统解析评估结果时出现异常，已记录中立表现。",
+        errorType: "none",
+        suggestion: "请尝试重新组织语言作答或检查网络状态。",
       };
     }
   }
@@ -169,7 +178,10 @@ JSON 字段要求：
    * 优化用户输入的考核要求 (Magic Sparkle)
    */
   static async optimizePrompt(userPrompt: string, systemMsg: string): Promise<string> {
-    const rawResult = await fetchFromAI(systemMsg, `用户要求：${userPrompt}\n\n请优化后的专业指令：`);
-    return rawResult.trim().replace(/^["']|["']$/g, '');
+    const rawResult = await fetchFromAI(
+      systemMsg,
+      `用户要求：${userPrompt}\n\n请优化后的专业指令：`,
+    );
+    return rawResult.trim().replace(/^["']|["']$/g, "");
   }
 }

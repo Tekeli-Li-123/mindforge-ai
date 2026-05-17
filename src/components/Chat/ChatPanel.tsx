@@ -1,40 +1,43 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, Bot, User, Sparkles, Trash2, Brain } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import type { ChatMessage } from '../../types';
-import { useMindMapStore } from '../../stores/mindmapStore';
-import { chatWithAI, type AIResponse } from '../../services/aiService';
-import { skillRegistry } from '../../services/skills';
-import { memoryService } from '../../services/memoryService';
-import { findNodePath, decodeHTMLEntities, flattenNodes } from '../../utils/mindmapHelpers';
-import './ChatPanel.css';
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { X, Send, Bot, User, Sparkles, Trash2, Brain } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import type { ChatMessage } from "../../types";
+import { useMindMapStore } from "../../stores/mindmapStore";
+import { chatWithAI, type AIResponse } from "../../services/aiService";
+import { skillRegistry } from "../../services/skills";
+import { memoryService } from "../../services/memoryService";
+import { findNodePath, decodeHTMLEntities, flattenNodes } from "../../utils/mindmapHelpers";
+import "./ChatPanel.css";
 
 const suggestions = [
-  '详细解释当前选中的节点',
-  '为当前选中的节点发散子节点',
-  '基于当前上下文生成 3 道练习题',
-  '总结当前导图的整体学习路线',
-  '帮我润色导图中的文字描述',
+  "详细解释当前选中的节点",
+  "为当前选中的节点发散子节点",
+  "基于当前上下文生成 3 道练习题",
+  "总结当前导图的整体学习路线",
+  "帮我润色导图中的文字描述",
 ];
 
 export default function ChatPanel() {
-  const { 
-    chatMessages, 
-    addChatMessage, 
-    toggleChat, 
-    clearChat, 
-    selectedNodeId, 
+  const {
+    chatMessages,
+    addChatMessage,
+    toggleChat,
+    clearChat,
+    selectedNodeId,
     currentProject,
     appendChildren,
     updateNode,
-    deleteNodes
+    deleteNodes,
   } = useMindMapStore();
-  
-  const [input, setInput] = useState('');
+
+  const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [actionLabel, setActionLabel] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const msgCounterRef = useRef(0);
+  const getMsgId = useCallback((suffix = "") => `msg-${++msgCounterRef.current}${suffix}`, []);
+  const getNow = useCallback(() => Date.now(), []);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -48,9 +51,9 @@ export default function ChatPanel() {
     if (!selectedNodeId || !currentProject) return null;
     const path = findNodePath(currentProject.root, selectedNodeId);
     if (!path) return null;
-    
+
     const node = path[path.length - 1];
-    const pathString = decodeHTMLEntities(path.map(n => n.content).join(' > '));
+    const pathString = decodeHTMLEntities(path.map((n) => n.content).join(" > "));
     return { node, pathString };
   }, [selectedNodeId, currentProject]);
 
@@ -59,14 +62,14 @@ export default function ChatPanel() {
     if (!messageText.trim() || isTyping) return;
 
     const userMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user' as const,
+      id: getMsgId(),
+      role: "user" as const,
       content: messageText.trim(),
-      timestamp: Date.now(),
+      timestamp: getNow(),
     };
 
     addChatMessage(userMessage);
-    if (!textOverride) setInput('');
+    if (!textOverride) setInput("");
     setIsTyping(true);
 
     try {
@@ -74,67 +77,67 @@ export default function ChatPanel() {
       const history = [...chatMessages, userMessage];
 
       setStreamingMessage({
-        id: `msg-${Date.now() + 1}`,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
+        id: getMsgId("-stream"),
+        role: "assistant",
+        content: "",
+        timestamp: getNow(),
       });
 
       const aiResponse: AIResponse = await chatWithAI(
-        history, 
-        contextData?.node, 
+        history,
+        contextData?.node,
         contextData?.pathString,
         (chunk, isReasoning) => {
           setStreamingMessage((prev) => {
             if (!prev) return prev;
             if (isReasoning) {
-              return { ...prev, reasoning: (prev.reasoning || '') + chunk };
+              return { ...prev, reasoning: (prev.reasoning || "") + chunk };
             } else {
               return { ...prev, content: prev.content + chunk };
             }
           });
-        }
+        },
       );
-      
+
       setStreamingMessage(null);
 
       // 处理 AI 指令 - 接入统一技能引擎
       const { cleanContent, actionLogs } = await processAiCommands(aiResponse.content);
-      
+
       if (actionLogs.length > 0) {
         setActionLabel(`✨ AI 已同步执行了 ${actionLogs.length} 项导图变更`);
         setTimeout(() => setActionLabel(null), 3000);
       }
 
       const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: 'assistant' as const,
+        id: getMsgId("-result"),
+        role: "assistant" as const,
         content: cleanContent,
-        timestamp: Date.now(),
+        timestamp: getNow(),
         reasoning: aiResponse.reasoning || undefined,
       };
 
       // 更新消息列表
       const updatedHistory = [...history, assistantMessage];
-      
+
       // --- 自动记忆管理：历史记录压缩逻辑 ---
       const COMPACTION_THRESHOLD = 15;
       if (updatedHistory.length >= COMPACTION_THRESHOLD) {
-        console.log('📦 [MemoryEngine] 触发对话自动压缩...');
+        console.log("📦 [MemoryEngine] 触发对话自动压缩...");
         const summary = await memoryService.summarizeHistory(updatedHistory);
         const compactedMessage: ChatMessage = {
-          id: `msg-compact-${Date.now()}`,
-          role: 'system' as any,
+          id: `msg-compact-${getNow()}`,
+          role: "system" as any,
           content: `🕒 对话内容过多，已自动整理摘要：${summary}`,
-          timestamp: Date.now(),
-          isCompacted: true
+          timestamp: getNow(),
+          isCompacted: true,
         };
         // 保留最后 2 条新消息作为即时上下文，合并之前的为摘要
         const newHistory = [compactedMessage, ...updatedHistory.slice(-2)];
-        
+
         // 我们直接清空并重置消息列表
         clearChat();
-        newHistory.forEach(msg => addChatMessage(msg));
+        newHistory.forEach((msg) => addChatMessage(msg));
       } else {
         addChatMessage(assistantMessage);
       }
@@ -142,18 +145,18 @@ export default function ChatPanel() {
       // 批量插入系统操作记录
       actionLogs.forEach((log, idx) => {
         addChatMessage({
-          id: `msg-sys-${Date.now() + 2 + idx}`,
-          role: 'system' as any,
+          id: `msg-sys-${getNow() + idx}`,
+          role: "system" as any,
           content: `✨ 自动执行：${log}`,
-          timestamp: Date.now() + 2 + idx,
+          timestamp: getNow() + idx,
         });
       });
     } catch (error: any) {
       addChatMessage({
-        id: `msg-${Date.now() + 1}`,
-        role: 'assistant' as const,
+        id: getMsgId("-err"),
+        role: "assistant" as const,
         content: `抱歉，我遇到了一点问题：${error.message}`,
-        timestamp: Date.now(),
+        timestamp: getNow(),
       });
     } finally {
       setIsTyping(false);
@@ -178,12 +181,12 @@ export default function ChatPanel() {
       projectId: currentProject?.id,
       addProjectMemory: (pid: string, fact: string) => {
         useMindMapStore.getState().addProjectMemory(pid, fact);
-      }
+      },
     });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -220,7 +223,9 @@ export default function ChatPanel() {
       {contextData && (
         <div className="chat-context-banner">
           <div className="chat-context-label">当前聚焦：</div>
-          <div className="chat-context-value" title={contextData.pathString}>{contextData.pathString}</div>
+          <div className="chat-context-value" title={contextData.pathString}>
+            {contextData.pathString}
+          </div>
         </div>
       )}
 
@@ -230,19 +235,17 @@ export default function ChatPanel() {
           {chatMessages.map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.role}`}>
               <div className="chat-avatar">
-                {msg.role === 'assistant' ? <Bot size={16} /> : <User size={16} />}
+                {msg.role === "assistant" ? <Bot size={16} /> : <User size={16} />}
               </div>
               <div className="chat-bubble-wrapper">
                 <div className="chat-bubble">
-                  {msg.role === 'system' ? (
+                  {msg.role === "system" ? (
                     <div className="system-log">{msg.content}</div>
-                  ) : msg.role === 'assistant' ? (
+                  ) : msg.role === "assistant" ? (
                     <div className="markdown-content">
                       {msg.reasoning && (
                         <details className="reasoning-block">
-                          <summary>
-                            💭 查看思维过程 ({msg.reasoning.length} 字符)
-                          </summary>
+                          <summary>💭 查看思维过程 ({msg.reasoning.length} 字符)</summary>
                           <div className="reasoning-content">
                             <ReactMarkdown>{msg.reasoning}</ReactMarkdown>
                           </div>
@@ -254,18 +257,18 @@ export default function ChatPanel() {
                     msg.content
                   )}
                 </div>
-                {msg.role !== 'system' && (
+                {msg.role !== "system" && (
                   <div className="chat-time">
-                    {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
+                    {new Date(msg.timestamp).toLocaleTimeString("zh-CN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
                   </div>
                 )}
               </div>
             </div>
           ))}
-          
+
           {streamingMessage && (
             <div className="chat-message assistant">
               <div className="chat-avatar ai">
@@ -276,9 +279,7 @@ export default function ChatPanel() {
                   <div className="markdown-content">
                     {streamingMessage.reasoning && (
                       <details className="reasoning-block" open>
-                        <summary>
-                          💭 正在思考 ({streamingMessage.reasoning.length} 字符)...
-                        </summary>
+                        <summary>💭 正在思考 ({streamingMessage.reasoning.length} 字符)...</summary>
                         <div className="reasoning-content">
                           <ReactMarkdown>{streamingMessage.reasoning}</ReactMarkdown>
                         </div>
@@ -318,11 +319,7 @@ export default function ChatPanel() {
           </p>
           <div className="chat-suggestions">
             {suggestions.map((s, i) => (
-              <button
-                key={i}
-                className="chat-suggestion-btn"
-                onClick={() => handleSend(s)}
-              >
+              <button key={i} className="chat-suggestion-btn" onClick={() => handleSend(s)}>
                 {s}
               </button>
             ))}
@@ -341,11 +338,7 @@ export default function ChatPanel() {
             placeholder="输入消息，和 AI 协作编辑导图..."
             rows={1}
           />
-          <button
-            className="chat-send-btn"
-            onClick={handleSend}
-            disabled={!input.trim()}
-          >
+          <button className="chat-send-btn" onClick={() => handleSend()} disabled={!input.trim()}>
             <Send size={14} />
           </button>
         </div>
