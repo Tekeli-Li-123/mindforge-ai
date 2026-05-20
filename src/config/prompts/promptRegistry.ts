@@ -14,7 +14,11 @@ import REFINE_PROMPT_V1, { refinePromptV1Meta } from "./refine-v1";
 import EXPLAIN_PROMPT_V1, { explainPromptV1Meta } from "./explain-v1";
 import REORGANIZE_PROMPT_V1, { reorganizePromptV1Meta } from "./reorganize-v1";
 import ASSESSMENT_PROMPT_V1, { assessmentPromptV1Meta } from "./assessment-v1";
-import { getTopKExamples, formatExamplesAsContext, type FewShotExample } from "./fewShotExamples";
+import {
+  TEMPLATE as ASSESSMENT_EVALUATE_TEMPLATE,
+  META as assessmentEvaluateMeta,
+} from "./assessment-evaluate-v1";
+import { getTopKExamples, formatExamplesAsContext } from "./fewShotExamples";
 
 // ============ 类型定义 ============
 
@@ -32,7 +36,8 @@ export interface PromptEntry {
   meta: PromptMeta;
 }
 
-type CategoryId = "system" | "refine" | "explain" | "reorganize" | "assessment";
+// 实际支持所有 string，定义别名方便 TS 提示
+type CategoryId = string;
 
 // ============ 注册表 ============
 
@@ -244,8 +249,17 @@ registerAlias("explain", "explain", "1.0.0");
 registerPrompt("reorganize", "1.0.0", REORGANIZE_PROMPT_V1, reorganizePromptV1Meta);
 registerAlias("reorganize", "reorganize", "1.0.0");
 
-// --- assessment ---
+// --- assessment (出题) ---
 registerPrompt("assessment", "1.0.0", ASSESSMENT_PROMPT_V1, assessmentPromptV1Meta);
 registerAlias("assessment", "assessment", "1.0.0");
+
+// --- assessment-evaluate (独立评估，与出题分离) ---
+registerPrompt(
+  "assessment-evaluate",
+  "1.0.0",
+  ASSESSMENT_EVALUATE_TEMPLATE,
+  assessmentEvaluateMeta,
+);
+registerAlias("assessment-evaluate", "assessment-evaluate", "1.0.0");
 
 export default registry;

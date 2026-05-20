@@ -8,7 +8,7 @@
  * @see ./prompts/promptRegistry.ts
  */
 
-import { getFilledPrompt, getPrompt, type PromptMeta } from "./prompts/promptRegistry";
+import { getFilledPrompt, getPrompt } from "./prompts/promptRegistry";
 
 /**
  * 从 registry 获取最新版本的 system prompt

@@ -1,6 +1,6 @@
-import { ReactNode } from 'react';
-import { X } from 'lucide-react';
-import './Modal.css';
+import type { ReactNode } from "react";
+import { X } from "lucide-react";
+import "./Modal.css";
 
 interface ModalProps {
   isOpen: boolean;
@@ -22,9 +22,7 @@ export default function Modal({ isOpen, onClose, title, children, footer }: Moda
             <X size={20} />
           </button>
         </div>
-        <div className="modal-body">
-          {children}
-        </div>
+        <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>

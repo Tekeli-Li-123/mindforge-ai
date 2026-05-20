@@ -494,7 +494,7 @@ describe("mindmapStore", () => {
 
       const { currentProject } = useMindMapStore.getState();
       expect(currentProject?.memories).toHaveLength(1);
-      expect(currentProject?.memories[0]).toBe("这是一个重要的知识点");
+      expect(currentProject!.memories![0]).toBe("这是一个重要的知识点");
     });
   });
 

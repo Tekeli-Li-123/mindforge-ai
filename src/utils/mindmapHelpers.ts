@@ -124,6 +124,23 @@ export function nodeToMarkdown(
 }
 
 /**
+ * 构建节点 ID → 父节点 ID 的索引表 (O(n) 单次遍历)
+ * 用于将 findNodePath / 树操作从 O(n) 降至 O(depth)
+ */
+export function buildParentIndex(root: MindMapNode): Record<string, string> {
+  const index: Record<string, string> = { [root.id]: root.id };
+
+  function walk(node: MindMapNode) {
+    for (const child of node.children) {
+      index[child.id] = node.id;
+      walk(child);
+    }
+  }
+  walk(root);
+  return index;
+}
+
+/**
  * 查找节点在导图中的完整路径 (提供上层的上下文知识结构)
  * 返回从根节点到目标节点的 content 数组
  */
@@ -140,9 +157,216 @@ export function findNodePath(root: MindMapNode, targetId: string): MindMapNode[]
 }
 
 /**
- * 语义去重检测
- * 移除常见噪音词（如“算法”、“概念”）并进行模糊匹配
+ * 利用 parentIndex 以 O(depth) 查找节点路径，替代 O(n) 的 findNodePath
  */
+export function findNodePathByIndex(
+  root: MindMapNode,
+  targetId: string,
+  parentIndex: Record<string, string>,
+): MindMapNode[] | null {
+  if (root.id === targetId) return [root];
+  if (!parentIndex[targetId]) return null;
+
+  // Walk up from target to root using index
+  const pathIds: string[] = [];
+  let currentId: string | undefined = targetId;
+  while (currentId && currentId !== root.id) {
+    pathIds.unshift(currentId);
+    currentId = parentIndex[currentId];
+  }
+  if (currentId !== root.id) return null; // not in this tree
+
+  // Walk down from root collecting actual node references
+  const path: MindMapNode[] = [root];
+  let current = root;
+  for (let i = 0; i < pathIds.length; i++) {
+    const child = current.children.find((c) => c.id === pathIds[i]);
+    if (!child) return null;
+    path.push(child);
+    current = child;
+  }
+  return path;
+}
+
+// ── Path-based tree mutation helpers (O(depth) node clones using parentIndex) ──
+
+function collectPathIds(
+  targetId: string,
+  parentIndex: Record<string, string>,
+  rootId: string,
+): string[] | null {
+  if (targetId === rootId) return [];
+  const ids: string[] = [];
+  let currentId: string | undefined = targetId;
+  while (currentId && currentId !== rootId) {
+    ids.unshift(currentId);
+    currentId = parentIndex[currentId];
+  }
+  if (currentId !== rootId) return null; // not in tree
+  return ids;
+}
+
+/**
+ * 沿 root→target 路径克隆节点，仅 O(depth) 次克隆，非路径子树保持引用不变
+ */
+function clonePathNodes(
+  node: MindMapNode,
+  pathIds: string[],
+  idx: number,
+  targetId: string,
+  updates?: Partial<MindMapNode>,
+): MindMapNode {
+  const newNode = { ...node };
+  if (node.id === targetId && updates) {
+    Object.assign(newNode, updates);
+  }
+  if (idx < pathIds.length) {
+    const childId = pathIds[idx];
+    newNode.children = node.children.map((child) =>
+      child.id === childId ? clonePathNodes(child, pathIds, idx + 1, targetId, updates) : child,
+    );
+  }
+  return newNode;
+}
+
+/** 利用 parentIndex 以 O(depth) 更新节点，替代 O(n) 的 updateNodeInTree */
+export function updateNodeInTreeByPath(
+  root: MindMapNode,
+  nodeId: string,
+  updates: Partial<MindMapNode>,
+  parentIndex: Record<string, string>,
+): MindMapNode {
+  if (root.id === nodeId) return { ...root, ...updates };
+  const pathIds = collectPathIds(nodeId, parentIndex, root.id);
+  if (!pathIds) return root;
+  return clonePathNodes(root, pathIds, 0, nodeId, updates);
+}
+
+/** 利用 parentIndex 以 O(depth) 删除节点，替代 O(n) 的 deleteNodeInTree */
+export function deleteNodeInTreeByPath(
+  root: MindMapNode,
+  nodeId: string,
+  parentIndex: Record<string, string>,
+): MindMapNode | null {
+  if (root.id === nodeId) return null;
+  const pidList = collectPathIds(nodeId, parentIndex, root.id);
+  if (!pidList) return root;
+
+  const parentId = parentIndex[nodeId];
+
+  function walk(node: MindMapNode, depth: number): MindMapNode {
+    if (node.id === parentId) {
+      return {
+        ...node,
+        children: node.children.filter((child) => child.id !== nodeId),
+      };
+    }
+    if (depth >= pidList!.length) return node;
+    const childId = pidList![depth];
+    return {
+      ...node,
+      children: node.children.map((child) =>
+        child.id === childId ? walk(child, depth + 1) : child,
+      ),
+    };
+  }
+  return walk(root, 0);
+}
+
+/** 利用 parentIndex 以 O(depth * n) 批量删除节点，替代 O(n) 的 deleteNodesInTree */
+export function deleteNodesInTreeByPath(
+  root: MindMapNode,
+  nodeIds: string[],
+  parentIndex: Record<string, string>,
+): MindMapNode | null {
+  const idsSet = new Set(nodeIds);
+  if (idsSet.has(root.id)) return null;
+
+  function walk(node: MindMapNode): MindMapNode | null {
+    if (idsSet.has(node.id)) return null;
+    return {
+      ...node,
+      children: node.children
+        .map((child) => walk(child))
+        .filter((child): child is MindMapNode => child !== null),
+    };
+  }
+
+  // Use index to find direct parents for each deleted node to minimize traversal
+  const targetsByParent = new Map<string, Set<string>>();
+  for (const nid of nodeIds) {
+    const pid = parentIndex[nid];
+    if (pid && !idsSet.has(pid)) {
+      if (!targetsByParent.has(pid)) targetsByParent.set(pid, new Set());
+      targetsByParent.get(pid)!.add(nid);
+    }
+  }
+
+  // If we have path info, do targeted traversal; otherwise full walk
+  if (targetsByParent.size === 0) return walk(root);
+
+  function walkPruned(node: MindMapNode): MindMapNode | null {
+    if (idsSet.has(node.id)) return null;
+    const targetChildren = targetsByParent.get(node.id);
+    if (targetChildren) {
+      return {
+        ...node,
+        children: node.children
+          .filter((child) => !targetChildren.has(child.id))
+          .map((child) => walkPruned(child))
+          .filter((child): child is MindMapNode => child !== null),
+      };
+    }
+    // Check if this node's subtree contains any deleted nodes
+    const hasDeleted = node.children.some((child) => {
+      let id: string | undefined = child.id;
+      while (id && id !== root.id) {
+        if (idsSet.has(id)) return true;
+        id = parentIndex[id];
+      }
+      return false;
+    });
+    if (!hasDeleted) return node; // keep entire subtree by reference
+    return {
+      ...node,
+      children: node.children
+        .map((child) => walkPruned(child))
+        .filter((child): child is MindMapNode => child !== null),
+    };
+  }
+  return walkPruned(root);
+}
+
+/** 利用 parentIndex 以 O(depth) 追加子节点，替代 O(n) 的 appendChildrenInTree */
+export function appendChildrenInTreeByPath(
+  root: MindMapNode,
+  parentId: string,
+  newChildren: MindMapNode[],
+  parentIndex: Record<string, string>,
+): MindMapNode {
+  if (root.id === parentId) {
+    return { ...root, children: [...root.children, ...newChildren], expanded: true };
+  }
+  const pidList = collectPathIds(parentId, parentIndex, root.id);
+  if (!pidList) return root;
+
+  function walk(node: MindMapNode, depth: number): MindMapNode {
+    if (node.id === parentId) {
+      return { ...node, children: [...node.children, ...newChildren], expanded: true };
+    }
+    if (depth >= pidList!.length) return node;
+    const childId = pidList![depth];
+    return {
+      ...node,
+      children: node.children.map((child) =>
+        child.id === childId ? walk(child, depth + 1) : child,
+      ),
+    };
+  }
+  return walk(root, 0);
+}
+
+/** 语义去重检测：移除常见噪音词并进行模糊匹配 */
 export function isSemanticDuplicate(text1: string, text2: string): boolean {
   if (!text1 || !text2) return false;
 
@@ -193,17 +417,15 @@ export function convertToMarkmapINode(node: MindMapNode, depth: number = 1): INo
     : `style="--node-color: ${nodeColor}; --node-progress: ${progress}%; --node-glow-color: ${nodeColorAlpha};"`;
 
   return {
-    type: isRoot ? "heading" : "list_item",
-    depth: depth,
     content: `<div data-id="${node.id}" class="mindmap-node-box${rootClass}" ${style}>
       <span class="node-content">${safeContent}</span>
       ${tagsHtml}
     </div>`,
     children: (node.children || []).map((child) => convertToMarkmapINode(child, depth + 1)),
-    payload: {
+    state: {
       fold: !node.expanded ? 1 : 0,
     },
-  };
+  } as unknown as INode;
 }
 
 const transformer = new Transformer();
@@ -219,7 +441,7 @@ export function parseMarkdownToMindMapNode(markdown: string): MindMapNode {
   const { root } = transformer.transform(cleanMd);
 
   // Recursively map INode to MindMapNode
-  function mapNode(inode: INode): MindMapNode {
+  function mapNode(inode: any): MindMapNode {
     // Transformer output content may contain HTML if we supplied it, or just raw text
     // Let's strip out HTML wrappers if they exist, or just use content
     const rawContent = inode.content;

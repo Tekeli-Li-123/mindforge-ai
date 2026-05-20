@@ -14,7 +14,7 @@
  *   3. 获取评估分数和改进建议
  */
 
-import { fillTemplate, type PromptMeta } from "./promptRegistry";
+import { fillTemplate } from "./promptRegistry";
 
 // ============ 类型定义 ============
 

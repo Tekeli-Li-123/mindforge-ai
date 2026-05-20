@@ -2,6 +2,17 @@
    MindForge AI — App Layout
    ========================================== */
 
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 .app-layout {
   display: flex;
   width: 100vw;

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useState } from "react";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Map,
@@ -14,19 +14,10 @@ import {
   Edit2,
   Copy,
   Trash2,
-} from 'lucide-react';
-import { useMindMapStore } from '../../stores/mindmapStore';
-import './Sidebar.css';
-
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: '仪表盘' },
-  // { to: '/editor', icon: Map, label: '知识导图' }, // We will replace this with custom logic
-  { to: '/quiz', icon: GraduationCap, label: '知识考核' },
-];
-
-const bottomItems = [
-  { to: '/settings', icon: Settings, label: '设置' },
-];
+} from "lucide-react";
+import { useMindMapStore } from "../../stores/mindmapStore";
+import { useTranslation } from "../../i18n";
+import "./Sidebar.css";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -34,17 +25,26 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
-  const { projects, currentProject, setCurrentProject, deleteProject, duplicateProject, updateProject } = useMindMapStore();
+  const { t } = useTranslation();
+  const {
+    projects,
+    currentProject,
+    setCurrentProject,
+    deleteProject,
+    duplicateProject,
+    updateProject,
+  } = useMindMapStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
-  // 判定当前是否在一个项目的编辑页
-  const isEditorActive = location.pathname === '/editor';
+  const isEditorActive = location.pathname === "/editor";
+
+  const bottomItems = [{ to: "/settings", icon: Settings, label: t("sidebar.settings") }];
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       {/* Logo */}
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">
@@ -55,29 +55,26 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Main Nav */}
       <nav className="sidebar-nav">
-        {!collapsed && <div className="sidebar-section-label">主菜单</div>}
+        {!collapsed && <div className="sidebar-section-label">{t("sidebar.main")}</div>}
         {/* Render Dashboard */}
         <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              `sidebar-nav-item ${isActive ? 'active' : ''}`
-            }
-            title={collapsed ? '仪表盘' : undefined}
-          >
-            <LayoutDashboard className="sidebar-nav-item-icon" size={20} />
-            {!collapsed && <span className="sidebar-nav-item-label">仪表盘</span>}
+          to="/"
+          end
+          className={({ isActive }) => `sidebar-nav-item ${isActive ? "active" : ""}`}
+          title={collapsed ? t("sidebar.dashboard") : undefined}
+        >
+          <LayoutDashboard className="sidebar-nav-item-icon" size={20} />
+          {!collapsed && <span className="sidebar-nav-item-label">{t("sidebar.dashboard")}</span>}
         </NavLink>
 
         {/* Custom Project List Item */}
         <div className="sidebar-projects-group">
-          <button 
-            className={`sidebar-nav-item ${isEditorActive && collapsed ? 'active' : ''}`}
-            title={collapsed ? '我的导图项目' : undefined}
+          <button
+            className={`sidebar-nav-item ${isEditorActive && collapsed ? "active" : ""}`}
+            title={collapsed ? t("sidebar.mindmaps") : undefined}
             onClick={() => {
               if (collapsed) {
-                // 如果是折叠状态，点击就跳转到仪表盘挑选
-                navigate('/');
+                navigate("/");
               } else {
                 setProjectsExpanded(!projectsExpanded);
               }
@@ -86,43 +83,42 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <Map className="sidebar-nav-item-icon" size={20} />
             {!collapsed && (
               <>
-                <span className="sidebar-nav-item-label">我的导图</span>
-                <ChevronDown 
-                  size={14} 
-                  style={{ 
-                    transition: 'transform 0.2s', 
-                    transform: projectsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                    color: 'var(--color-text-tertiary)'
-                  }} 
+                <span className="sidebar-nav-item-label">{t("sidebar.mindmaps")}</span>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transition: "transform 0.2s",
+                    transform: projectsExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                    color: "var(--color-text-tertiary)",
+                  }}
                 />
               </>
             )}
           </button>
-          
-          {/* 展开的项目列表 */}
+
           {!collapsed && projectsExpanded && (
             <div className="sidebar-projects-list">
               {projects.length === 0 ? (
-                <div className="sidebar-empty-state">暂无项目</div>
+                <div className="sidebar-empty-state">{t("sidebar.noProjects")}</div>
               ) : (
-                projects.map(proj => {
+                projects.map((proj) => {
                   const isActiveProj = isEditorActive && currentProject?.id === proj.id;
                   return (
                     <div key={proj.id} className="sidebar-project-item-container">
                       <button
-                        className={`sidebar-project-item ${isActiveProj ? 'active' : ''}`}
+                        className={`sidebar-project-item ${isActiveProj ? "active" : ""}`}
                         onClick={() => {
                           setCurrentProject(proj);
-                          navigate('/editor');
+                          navigate("/editor");
                         }}
                         title={proj.title}
                       >
                         <FileText size={14} />
                         <span className="sidebar-project-name">{proj.title}</span>
                       </button>
-                      
-                      <button 
-                        className={`sidebar-project-more-btn ${activeMenuId === proj.id ? 'active' : ''}`}
+
+                      <button
+                        className={`sidebar-project-more-btn ${activeMenuId === proj.id ? "active" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setActiveMenuId(activeMenuId === proj.id ? null : proj.id);
@@ -133,32 +129,43 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
                       {activeMenuId === proj.id && (
                         <div className="sidebar-project-dropdown glass animate-fade-in">
-                          <div className="dropdown-item" onClick={(e) => {
-                            e.stopPropagation();
-                            const newTitle = window.prompt('设个新名字吧：', proj.title);
-                            if (newTitle) {
-                               updateProject(proj.id, { title: newTitle });
-                            }
-                            setActiveMenuId(null);
-                          }}>
-                            <Edit2 size={13} /> 重命名
+                          <div
+                            className="dropdown-item"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const newTitle = window.prompt(t("sidebar.renamePrompt"), proj.title);
+                              if (newTitle) {
+                                updateProject(proj.id, { title: newTitle });
+                              }
+                              setActiveMenuId(null);
+                            }}
+                          >
+                            <Edit2 size={13} /> {t("sidebar.rename")}
                           </div>
-                          <div className="dropdown-item" onClick={(e) => {
-                            e.stopPropagation();
-                            duplicateProject(proj.id);
-                            setActiveMenuId(null);
-                          }}>
-                            <Copy size={13} /> 复制
+                          <div
+                            className="dropdown-item"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              duplicateProject(proj.id);
+                              setActiveMenuId(null);
+                            }}
+                          >
+                            <Copy size={13} /> {t("sidebar.duplicate")}
                           </div>
-                          <div className="dropdown-item delete" onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`确定要删除“${proj.title}”及其学习记录吗？`)) {
-                              deleteProject(proj.id);
-                              if (isActiveProj) navigate('/');
-                            }
-                            setActiveMenuId(null);
-                          }}>
-                            <Trash2 size={13} /> 删除
+                          <div
+                            className="dropdown-item delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (
+                                window.confirm(t("sidebar.deleteConfirm", { title: proj.title }))
+                              ) {
+                                deleteProject(proj.id);
+                                if (isActiveProj) navigate("/");
+                              }
+                              setActiveMenuId(null);
+                            }}
+                          >
+                            <Trash2 size={13} /> {t("sidebar.delete")}
                           </div>
                         </div>
                       )}
@@ -172,26 +179,24 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {/* Render Quiz */}
         <NavLink
-            to="/quiz"
-            className={({ isActive }) =>
-              `sidebar-nav-item ${isActive ? 'active' : ''}`
-            }
-            title={collapsed ? '知识考核' : undefined}
-          >
-            <GraduationCap className="sidebar-nav-item-icon" size={20} />
-            {!collapsed && <span className="sidebar-nav-item-label">知识考核</span>}
+          to="/quiz"
+          className={({ isActive }) => `sidebar-nav-item ${isActive ? "active" : ""}`}
+          title={collapsed ? t("sidebar.knowledgeQuiz") : undefined}
+        >
+          <GraduationCap className="sidebar-nav-item-icon" size={20} />
+          {!collapsed && (
+            <span className="sidebar-nav-item-label">{t("sidebar.knowledgeQuiz")}</span>
+          )}
         </NavLink>
 
         <div style={{ flex: 1 }} />
 
-        {!collapsed && <div className="sidebar-section-label">系统</div>}
+        {!collapsed && <div className="sidebar-section-label">{t("sidebar.system")}</div>}
         {bottomItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
-            className={({ isActive }) =>
-              `sidebar-nav-item ${isActive ? 'active' : ''}`
-            }
+            className={({ isActive }) => `sidebar-nav-item ${isActive ? "active" : ""}`}
             title={collapsed ? item.label : undefined}
           >
             <item.icon className="sidebar-nav-item-icon" size={20} />
@@ -205,7 +210,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <button
           className="sidebar-toggle-btn"
           onClick={onToggle}
-          title={collapsed ? '展开侧栏' : '收起侧栏'}
+          title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>

@@ -13,7 +13,7 @@
 
 export interface FewShotExample {
   id: string;
-  category: "system" | "refine" | "explain" | "reorganize" | "assessment";
+  category: string;
   input: string;
   output: string;
   tags: string[];

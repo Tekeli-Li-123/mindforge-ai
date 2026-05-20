@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   GraduationCap,
   Brain,
@@ -19,11 +20,11 @@ import {
   FileText,
   BarChart3,
   History,
-  BookOpen,
   Target,
   RotateCcw,
+  Map,
+  FolderOpen,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { useMindMapStore } from "../stores/mindmapStore";
 import { AssessmentService } from "../services/assessmentService";
 import {
@@ -33,8 +34,9 @@ import {
   calculateProxyEvidence,
   INITIAL_COGNITIVE_STATE,
 } from "../utils/bayesianEngine";
-import { flattenNodesWithPaths } from "../utils/mindmapHelpers";
 import type { MindMapNode, QuizQuestion, LLMEvidence, CognitiveState } from "../types";
+import { countNodes, averageMastery } from "../utils/mindmapHelpers";
+import { useTranslation } from "../i18n";
 import "./Quiz.css";
 
 // ==========================================
@@ -65,6 +67,79 @@ interface SessionRecord {
 }
 
 // ==========================================
+// NodeBrowser sub-component (extracted to fix useState-in-render issue)
+// ==========================================
+
+function NodeBrowser({
+  flatNodes,
+  selectedNode,
+  onSelectNode,
+  t,
+}: {
+  flatNodes: Array<{ node: MindMapNode; path: string; depth: number }>;
+  selectedNode: MindMapNode | null;
+  onSelectNode: (node: MindMapNode, path: string) => void;
+  t: (key: string, params?: Record<string, any>) => string;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(flatNodes.length > 0 ? [flatNodes[0].node.id] : []),
+  );
+
+  const toggleExpand = (nodeId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  const renderNodeItem = (item: { node: MindMapNode; path: string; depth: number }) => {
+    const isLeaf = item.node.children.length === 0;
+    const isExpanded = expanded.has(item.node.id);
+    const isSelected = selectedNode?.id === item.node.id;
+    return (
+      <div key={item.node.id} className="node-tree-item">
+        <div className="node-tree-row" style={{ paddingLeft: item.depth * 16 }}>
+          {isLeaf ? (
+            <span className="tree-toggle-spacer" />
+          ) : (
+            <button className="tree-toggle-btn" onClick={() => toggleExpand(item.node.id)}>
+              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+          )}
+          <button
+            className={`node-select-btn ${isSelected ? "selected" : ""}`}
+            onClick={() => onSelectNode(item.node, item.path)}
+          >
+            <span className="node-name">{item.node.content}</span>
+            <span
+              className="node-mastery-badge"
+              style={{ color: `hsl(${item.node.mastery * 120}, 70%, 45%)` }}
+            >
+              {formatMasteryPercentage(item.node.mastery)}
+            </span>
+          </button>
+        </div>
+        {!isLeaf && isExpanded && (
+          <div className="node-tree-children">
+            {item.node.children.map((child) => {
+              const childFlat = flatNodes.find((n) => n.node.id === child.id);
+              return childFlat ? renderNodeItem(childFlat) : null;
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const rootNode = flatNodes.find((n) => n.depth === 0);
+  if (!rootNode) return <div className="node-tree-empty">{t("quiz.mapEmpty")}</div>;
+
+  return <div className="node-tree-container">{renderNodeItem(rootNode)}</div>;
+}
+
+// ==========================================
 // Helper: Recursive node collector
 // ==========================================
 
@@ -74,14 +149,12 @@ function collectFlatNodes(
 ): Array<{ node: MindMapNode; path: string; depth: number }> {
   const nodes: Array<{ node: MindMapNode; path: string; depth: number }> = [];
 
-  // Build path from ancestors
   const pathLabel = node.content;
 
   nodes.push({ node, path: pathLabel, depth });
 
   for (const child of node.children) {
     const childNodes = collectFlatNodes(child, depth + 1);
-    // Prepend parent path to child paths
     for (const cn of childNodes) {
       cn.path = `${pathLabel} › ${cn.path}`;
     }
@@ -102,30 +175,39 @@ const getWeights = (preset?: string) => {
 };
 
 // ==========================================
+// Preset keys
+// ==========================================
+const PRESET_KEYS = ["balanced", "theoretical", "practical", "exam"] as const;
+
+const PRESET_DESCRIPTION: Record<string, string> = {
+  balanced: "Intermediate: Focuses on conceptual understanding and simple application.",
+  theoretical: "Advanced: Focuses on deep concept analysis and critical thinking.",
+  practical: "Applied: Focuses on real-world case analysis and problem-solving.",
+  exam: "Basic: Focuses on knowledge memorization and accurate recall.",
+};
+
+// ==========================================
 // Main Component
 // ==========================================
 
 export default function Quiz() {
-  const { currentProject, updateNodeCognitiveState } = useMindMapStore();
+  const { t } = useTranslation();
+  const { currentProject, projects, setCurrentProject, updateNodeCognitiveState } =
+    useMindMapStore();
 
-  // --- Navigation state ---
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
-
-  // --- Assessment flow state ---
   const [step, setStep] = useState<QuizStep>("overview");
   const [selectedNode, setSelectedNode] = useState<MindMapNode | null>(null);
   const [selectedNodePath, setSelectedNodePath] = useState("");
-
-  /// Setup config
-  const [difficultyPrompt, setDifficultyPrompt] = useState("进阶水平：侧重概念的理解与简单应用。");
+  const [difficultyPrompt, setDifficultyPrompt] = useState(
+    "Intermediate: Focuses on conceptual understanding and simple application.",
+  );
   const [questionCount, setQuestionCount] = useState(3);
-  const [allowedTypes, setAllowedTypes] = useState<("choice" | "trueFalse" | "openEnded")[]>([
-    "openEnded",
-    "choice",
-  ]);
+  const [allowedTypes, setAllowedTypes] = useState<
+    ("choice" | "trueFalse" | "openEnded" | "fillBlank")[]
+  >(["openEnded", "choice"]);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
-  // Question state
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
@@ -135,7 +217,6 @@ export default function Quiz() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Session history (stored in memory for this session)
   const [sessionHistory, setSessionHistory] = useState<SessionRecord[]>(() => {
     try {
       const saved = localStorage.getItem("mindforge-quiz-history");
@@ -145,61 +226,52 @@ export default function Quiz() {
     }
   });
 
-  // Node browser tree collapsed state
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
+  // --- Project selector state ---
+  const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
 
-  // --- Derived data ---
+  // --- Memoized data ---
   const flatNodes = useMemo(() => {
     if (!currentProject) return [];
     return collectFlatNodes(currentProject.root);
   }, [currentProject]);
 
-  const nodeMasteryMap = useMemo(() => {
-    const map: Record<string, { mastery: number; state?: CognitiveState }> = {};
-    if (!currentProject) return map;
-
-    for (const { node } of flatNodes) {
-      const state = currentProject.cognitiveStates?.[node.id];
-      map[node.id] = {
-        mastery: node.mastery ?? 0,
-        state: state || INITIAL_COGNITIVE_STATE,
-      };
-    }
-    return map;
-  }, [flatNodes, currentProject]);
+  const nodeCount = useMemo(() => {
+    if (!currentProject) return 0;
+    return countNodes(currentProject.root);
+  }, [currentProject]);
 
   const overallMastery = useMemo(() => {
-    if (flatNodes.length === 0) return 0;
-    return flatNodes.reduce((sum, { node }) => sum + (node.mastery || 0), 0) / flatNodes.length;
-  }, [flatNodes]);
+    if (!currentProject) return 0;
+    return averageMastery(currentProject.root);
+  }, [currentProject]);
 
-  // Preset cards
-  const presets = [
-    {
-      label: "👶 基础入门",
-      prompt: "基础水平：侧重核心定义、基本概念的准确回忆，用通俗易懂的方式出题。",
-    },
-    {
-      label: "💼 面试模拟",
-      prompt: "面试官人设：模拟大厂社招架构师面试提问，侧重技术选型对比与实际落地瓶颈分析。",
-    },
-    {
-      label: "🎓 专家深挖",
-      prompt: "专家水平：侧重深度分析、逻辑辨析与底层原理，考查知识点的深度关联。",
-    },
-  ];
+  const totalQuestionsAnswered = useMemo(() => {
+    return sessionHistory.length;
+  }, [sessionHistory]);
 
-  // --- Reset assessment ---
+  // --- Reset assessment state ---
   const resetAssessment = () => {
     setStep("overview");
-    setError(null);
-    setUserAnswer("");
+    setSelectedNode(null);
+    setSelectedNodePath("");
+    setQuestions([]);
     setCurrentIndex(0);
+    setUserAnswer("");
     setSessionEvidences([]);
     setSessionResults([]);
     setMasteryData(null);
-    setQuestions([]);
     setIsRegenerating(false);
+    setError(null);
+  };
+
+  // --- Handle switching project ---
+  const handleSwitchProject = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (project) {
+      setCurrentProject(project);
+      resetAssessment();
+    }
+    setProjectSelectorOpen(false);
   };
 
   // --- Optimize prompt ---
@@ -207,8 +279,7 @@ export default function Quiz() {
     if (!difficultyPrompt.trim()) return;
     setIsOptimizing(true);
     try {
-      const systemMsg =
-        "你是一个 Prompt 优化专家。请将用户简单的考核要求转化为一段专业的、具有人设色彩的教育评估指令。输出要简洁有力（50字以内）。只输出优化后的文本。";
+      const systemMsg = t("quiz.optimizeSystemMsg");
       const optimized = await AssessmentService.optimizePrompt(difficultyPrompt, systemMsg);
       setDifficultyPrompt(optimized);
     } catch (err) {
@@ -235,7 +306,7 @@ export default function Quiz() {
       setCurrentIndex(0);
       setStep("question");
     } catch (err: any) {
-      setError(err.message || "无法生成题目");
+      setError(err.message || t("quiz.generateFailed"));
       setStep("setup");
     }
   };
@@ -260,7 +331,9 @@ export default function Quiz() {
         selectedNodePath,
         currentQ.question,
         difficultyPrompt,
-        allowedTypes.length === 0 ? ["choice", "trueFalse", "openEnded"] : allowedTypes,
+        allowedTypes.length === 0
+          ? ["choice", "trueFalse", "openEnded", "fillBlank"]
+          : allowedTypes,
       );
 
       const newQuestions = [...questions];
@@ -268,776 +341,790 @@ export default function Quiz() {
       setQuestions(newQuestions);
       setUserAnswer("");
     } catch (err: any) {
-      setError("重新生成失败：" + err.message);
+      setError(t("quiz.regenerateFailed") + err.message);
     } finally {
       setIsRegenerating(false);
     }
   };
 
   // --- Skip question ---
-  const handleSkipQuestion = () => {
+  const handleSkip = () => {
     const currentQ = questions[currentIndex];
     if (!currentQ) return;
 
-    setSessionResults((prev) => [
-      ...prev,
-      {
-        question: currentQ.question,
-        type: currentQ.type,
-        userAnswer: "（用户已跳过此题）",
-        correctAnswer:
-          currentQ.correctAnswer || (currentQ.type === "openEnded" ? "见标准答案" : ""),
-        isCorrect: false,
-        isSkipped: true,
-        explanation: "该题目已被用户标记为有误并跳过。",
-      },
-    ]);
+    const result: SessionResult = {
+      question: currentQ.question,
+      type: currentQ.type,
+      userAnswer: t("quiz.skippedAnswer"),
+      correctAnswer: currentQ.correctAnswer || "",
+      isCorrect: false,
+      isSkipped: true,
+      explanation: currentQ.explanation || "",
+    };
+    saveAndNext(result);
+  };
+
+  // --- Submit answer ---
+  const handleSubmit = () => {
+    const currentQ = questions[currentIndex];
+    if (!currentQ) return;
+
+    let isCorrect: boolean;
+    let correctAnswer = currentQ.correctAnswer || "";
+
+    if (currentQ.type === "trueFalse") {
+      isCorrect = userAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
+    } else if (currentQ.type === "fillBlank") {
+      isCorrect = userAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
+    } else if (currentQ.type === "choice" && currentQ.options) {
+      // For choice type, correctAnswer holds the text of the correct option
+      const selectedText = currentQ.options[parseInt(userAnswer, 10)];
+      isCorrect = selectedText === correctAnswer;
+      correctAnswer = correctAnswer || (currentQ.options[0] ?? "");
+    } else {
+      // openEnded: mark correct if answer has content; better match if includes keywords
+      isCorrect = userAnswer.trim().length > 0;
+      if (
+        correctAnswer &&
+        userAnswer.trim().toLowerCase().includes(correctAnswer.trim().toLowerCase())
+      ) {
+        isCorrect = true;
+      }
+    }
+
+    const result: SessionResult = {
+      question: currentQ.question,
+      type: currentQ.type,
+      userAnswer: userAnswer.trim(),
+      correctAnswer,
+      isCorrect,
+      isSkipped: false,
+      explanation: currentQ.explanation || "",
+    };
+    saveAndNext(result);
+  };
+
+  // --- Save result and advance ---
+  const saveAndNext = (result: SessionResult) => {
+    const newResults = [...sessionResults, result];
+    setSessionResults(newResults);
 
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(currentIndex + 1);
       setUserAnswer("");
     } else {
-      finalizeSession(sessionEvidences);
+      setStep("evaluating");
+      evaluateSession(newResults);
     }
   };
 
-  // --- Submit answer ---
-  const handleAnswerSubmit = async () => {
-    const currentQ = questions[currentIndex];
-    if (!currentQ || !userAnswer.trim()) return;
+  // --- Evaluate session with bayesian update ---
+  const evaluateSession = useCallback(
+    async (results: SessionResult[]) => {
+      if (!selectedNode || !currentProject) return;
 
-    setStep("evaluating");
-    try {
-      let evidence: LLMEvidence;
+      const masteryBefore = selectedNode.mastery;
+      const weights = getWeights(currentProject.cognitiveConfig?.preset);
 
-      if (currentQ.type === "openEnded") {
-        evidence = await AssessmentService.extractEvidence(
-          selectedNode?.content || "",
-          selectedNode?.explanation || "",
-          currentQ.question,
-          currentQ.referenceAnswer || "",
-          userAnswer,
+      const counts = { correct: 0, wrong: 0, skip: 0 };
+      for (const r of results) {
+        if (r.isSkipped) counts.skip++;
+        else if (r.isCorrect) counts.correct++;
+        else counts.wrong++;
+      }
+
+      // AI-driven evidence per result
+      const llmEvidences: LLMEvidence[] = [];
+      for (const r of results) {
+        if (r.isSkipped) continue;
+        try {
+          const evidence = await AssessmentService.extractEvidence(
+            selectedNode.content,
+            selectedNode.explanation || selectedNode.content,
+            r.question,
+            r.correctAnswer,
+            r.userAnswer,
+            "understand",
+          );
+          llmEvidences.push(evidence);
+        } catch {
+          // Fallback: use proxy evidence
+          const proxy = calculateProxyEvidence(r.isCorrect, "medium", r.type === "choice");
+          llmEvidences.push(proxy);
+        }
+      }
+
+      // If no AI evidences collected, use a single proxy
+      if (llmEvidences.length === 0) {
+        const ratio = counts.correct / Math.max(1, counts.correct + counts.wrong);
+        const proxy = calculateProxyEvidence(
+          ratio > 0.5,
+          ratio > 0.8 ? "easy" : ratio > 0.4 ? "medium" : "hard",
+          false,
         );
-      } else {
-        const cleanAnswer = userAnswer.trim().toLowerCase();
-        const cleanCorrect = (currentQ.correctAnswer || "").trim().toLowerCase();
+        llmEvidences.push(proxy);
+      }
 
-        // Boolean mapping for trueFalse
-        const booleanMap: Record<string, string[]> = {
-          正确: ["正确", "对", "true", "yes", "1"],
-          错误: ["错误", "错", "false", "no", "0"],
+      setSessionEvidences(llmEvidences);
+
+      // Update cognitive state
+      try {
+        const currentCognitiveState: CognitiveState = currentProject.cognitiveStates?.[
+          selectedNode.id
+        ] || {
+          ...INITIAL_COGNITIVE_STATE,
+          alpha: INITIAL_COGNITIVE_STATE.alpha,
+          beta: INITIAL_COGNITIVE_STATE.beta,
+          lastUpdate: Date.now(),
+          evidenceHistory: [],
         };
 
-        const isBooleanMatch = (input: string, target: string) => {
-          for (const [, aliases] of Object.entries(booleanMap)) {
-            if (aliases.includes(input) && aliases.includes(target)) return true;
-            if (input === target) return true;
-          }
-          return false;
+        // Aggregate all evidences into one combined update
+        const combinedEvidence: LLMEvidence = {
+          recall: llmEvidences.reduce((s, e) => s + e.recall, 0) / llmEvidences.length,
+          comprehension:
+            llmEvidences.reduce((s, e) => s + e.comprehension, 0) / llmEvidences.length,
+          application: llmEvidences.reduce((s, e) => s + e.application, 0) / llmEvidences.length,
+          analysis: llmEvidences.reduce((s, e) => s + e.analysis, 0) / llmEvidences.length,
+          feedback: llmEvidences.map((e) => e.feedback).join("; "),
+          errorType: llmEvidences.some((e) => e.errorType !== "none")
+            ? (llmEvidences.find((e) => e.errorType !== "none")?.errorType ?? "none")
+            : "none",
+          suggestion: llmEvidences
+            .map((e) => e.suggestion)
+            .filter(Boolean)
+            .join("；"),
         };
 
-        const isLiteralMatch = cleanAnswer === cleanCorrect;
-        const isBoolMatch =
-          currentQ.type === "trueFalse" && isBooleanMatch(cleanAnswer, cleanCorrect);
-        const isOptionMatch =
-          currentQ.type === "choice" &&
-          currentQ.options?.some((opt, idx) => {
-            const label = String.fromCharCode(65 + idx).toLowerCase();
-            return (
-              (cleanAnswer === label || cleanAnswer === opt.toLowerCase()) &&
-              opt.toLowerCase() === cleanCorrect
-            );
-          });
+        const { newState, masteryAfter } = updateCognitiveState(
+          currentCognitiveState,
+          { ...combinedEvidence, question: "", userAnswer: "" },
+          weights,
+        );
 
-        const isCorrect = isLiteralMatch || isBoolMatch || isOptionMatch;
-        evidence = calculateProxyEvidence(isCorrect, currentQ.difficulty);
+        updateNodeCognitiveState(selectedNode.id, newState);
 
-        setSessionResults((prev) => [
-          ...prev,
-          {
-            question: currentQ.question,
-            type: currentQ.type,
-            userAnswer,
-            correctAnswer: currentQ.correctAnswer || "",
-            isCorrect,
-            isSkipped: false,
-            explanation: currentQ.explanation || "",
-          },
-        ]);
+        setMasteryData({ before: masteryBefore, after: masteryAfter });
+
+        // Save to history
+        const record: SessionRecord = {
+          id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          nodeId: selectedNode.id,
+          nodeName: selectedNode.content,
+          timestamp: Date.now(),
+          questionCount: results.length,
+          results,
+          masteryBefore,
+          masteryAfter,
+        };
+        const newHistory = [record, ...sessionHistory].slice(0, 50);
+        setSessionHistory(newHistory);
+        localStorage.setItem("mindforge-quiz-history", JSON.stringify(newHistory));
+      } catch (err) {
+        console.error(t("quiz.cognitiveUpdateFailed"), err);
       }
 
-      // For openEnded, record after extractEvidence
-      if (currentQ.type === "openEnded") {
-        setSessionResults((prev) => [
-          ...prev,
-          {
-            question: currentQ.question,
-            type: currentQ.type,
-            userAnswer,
-            correctAnswer: currentQ.referenceAnswer || "见 AI 评估结果",
-            isCorrect: (evidence as any).recall >= 0.6,
-            isSkipped: false,
-            explanation: (evidence as any).feedback || "",
-          },
-        ]);
-      }
+      setStep("summary");
+    },
+    [selectedNode, currentProject, sessionHistory, updateNodeCognitiveState, t],
+  );
 
-      const newEvidences = [...sessionEvidences, evidence];
-      setSessionEvidences(newEvidences);
+  // ==========================================
+  // Render: Project Selector Dropdown
+  // ==========================================
+  const renderProjectSelector = () => (
+    <div className="project-selector-container">
+      <button
+        className="project-selector-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setProjectSelectorOpen(!projectSelectorOpen);
+        }}
+      >
+        <FolderOpen size={16} />
+        <span className="project-selector-label">
+          {currentProject ? currentProject.title : t("quiz.selectProject")}
+        </span>
+        <ChevronDown
+          size={14}
+          style={{
+            transition: "transform 0.2s",
+            transform: projectSelectorOpen ? "rotate(180deg)" : "rotate(0deg)",
+          }}
+        />
+      </button>
+      {projectSelectorOpen && (
+        <div className="project-selector-dropdown glass">
+          {projects.length === 0 ? (
+            <div className="project-selector-empty">{t("quiz.noProjects")}</div>
+          ) : (
+            projects.map((proj) => (
+              <button
+                key={proj.id}
+                className={`project-selector-item ${currentProject?.id === proj.id ? "active" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSwitchProject(proj.id);
+                }}
+              >
+                <Map size={14} />
+                <span className="project-selector-item-name">{proj.title}</span>
+                {currentProject?.id === proj.id && (
+                  <CheckCircle2 size={14} className="project-selected-check" />
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 
-      if (currentIndex < questions.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-        setUserAnswer("");
-        setStep("question");
-      } else {
-        finalizeSession(newEvidences);
-      }
-    } catch (err: any) {
-      setError("评估失败: " + err.message);
-      setStep("question");
-    }
-  };
-
-  // --- Finalize session ---
-  const finalizeSession = (evidences: LLMEvidence[]) => {
-    if (!currentProject || !selectedNode) return;
-
-    let currentState =
-      (currentProject.cognitiveStates || {})[selectedNode.id] || INITIAL_COGNITIVE_STATE;
-    const preset = currentProject.cognitiveConfig?.preset || "balanced";
-    const weights = currentProject.cognitiveConfig?.customWeights || getWeights(preset);
-
-    let lastMasteryAfter = 0;
-    let firstMasteryBefore = 0;
-
-    evidences.forEach((ev, idx) => {
-      const { newState, masteryBefore, masteryAfter } = updateCognitiveState(
-        currentState as CognitiveState,
-        { ...ev, question: "Diagnostic Session", userAnswer: "Aggregated Evidence" },
-        weights,
+  // ==========================================
+  // Render: Question View
+  // ==========================================
+  const renderQuestion = () => {
+    const currentQ = questions[currentIndex];
+    if (!currentQ) {
+      return (
+        <div className="quiz-state-view">
+          <Loader2 size={32} className="spinner" />
+          <p>{t("quiz.loadingQuestionsText")}</p>
+        </div>
       );
-      currentState = newState;
-      lastMasteryAfter = masteryAfter;
-      if (idx === 0) firstMasteryBefore = masteryBefore;
-    });
-
-    updateNodeCognitiveState(selectedNode.id, currentState as CognitiveState);
-    setMasteryData({ before: firstMasteryBefore, after: lastMasteryAfter });
-
-    // Save to session history
-    const record: SessionRecord = {
-      id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      nodeId: selectedNode.id,
-      nodeName: selectedNode.content,
-      timestamp: Date.now(),
-      questionCount: questions.length,
-      results: sessionResults,
-      masteryBefore: firstMasteryBefore,
-      masteryAfter: lastMasteryAfter,
-    };
-
-    const newHistory = [record, ...sessionHistory].slice(0, 50); // Keep latest 50
-    setSessionHistory(newHistory);
-    try {
-      localStorage.setItem("mindforge-quiz-history", JSON.stringify(newHistory));
-    } catch {
-      /* ignore quota errors */
     }
 
-    setStep("summary");
-  };
-
-  // --- Toggle type ---
-  const toggleType = (type: "choice" | "trueFalse" | "openEnded") => {
-    if (allowedTypes.includes(type)) {
-      setAllowedTypes(allowedTypes.filter((t) => t !== type));
-    } else {
-      setAllowedTypes([...allowedTypes, type]);
-    }
-  };
-
-  // --- Render node tree recursively ---
-  const renderNodeTree = (node: MindMapNode, depth: number = 0, parentPath: string = "") => {
-    const currentPath = parentPath ? `${parentPath} › ${node.content}` : node.content;
-    const isCollapsed = collapsedNodes.has(node.id);
-    const masteryInfo = nodeMasteryMap[node.id];
-    const masteryPercent = masteryInfo ? Math.round(masteryInfo.mastery * 100) : 0;
-
-    const hasChildren = node.children.length > 0;
-
-    const masteryColor =
-      masteryPercent >= 70
-        ? "var(--color-success)"
-        : masteryPercent >= 40
-          ? "var(--color-warning)"
-          : "var(--color-text-dim)";
+    const typeLabel =
+      currentQ.type === "choice"
+        ? t("quiz.typeChoice")
+        : currentQ.type === "trueFalse"
+          ? t("quiz.typeTrueFalse")
+          : currentQ.type === "fillBlank"
+            ? t("quiz.typeFillBlank")
+            : t("quiz.typeOpenEnded");
 
     return (
-      <div key={node.id} className="node-tree-item" style={{ paddingLeft: `${depth * 16 + 8}px` }}>
-        <div className="node-tree-row">
-          {hasChildren ? (
-            <button
-              className="tree-toggle-btn"
-              onClick={() => {
-                const next = new Set(collapsedNodes);
-                if (isCollapsed) next.delete(node.id);
-                else next.add(node.id);
-                setCollapsedNodes(next);
-              }}
-            >
-              {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-            </button>
-          ) : (
-            <span className="tree-toggle-spacer" />
-          )}
-
-          <button
-            className={`node-select-btn ${selectedNode?.id === node.id ? "selected" : ""}`}
-            onClick={() => handleSelectNode(node, currentPath)}
-          >
-            <span className="node-name">{node.content}</span>
-            <span className="node-mastery-badge" style={{ color: masteryColor }}>
-              {masteryPercent}%
-            </span>
-          </button>
+      <div className="quiz-question-view">
+        {/* Progress Bar */}
+        <div className="quiz-progress-bar">
+          <div
+            className="progress-fill"
+            style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
+          />
+          <span className="progress-text">
+            {currentIndex + 1} / {questions.length}
+          </span>
         </div>
 
-        {!isCollapsed && hasChildren && (
-          <div className="node-tree-children">
-            {node.children.map((child) => renderNodeTree(child, depth + 1, currentPath))}
+        {/* Question content */}
+        <div className="question-content">
+          <span className="type-badge">{typeLabel}</span>
+          <div className="question-text">{currentQ.question}</div>
+
+          {/* Render based on type */}
+          {currentQ.type === "choice" && currentQ.options && (
+            <div className="choice-list">
+              {currentQ.options.map((choice, idx) => (
+                <button
+                  key={idx}
+                  className={`choice-item ${userAnswer === idx.toString() ? "selected" : ""}`}
+                  onClick={() => setUserAnswer(idx.toString())}
+                >
+                  <span className="choice-index">{String.fromCharCode(65 + idx)}</span>
+                  {choice}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {currentQ.type === "trueFalse" && (
+            <div className="boolean-list">
+              <button
+                className={`boolean-item ${userAnswer === "true" ? "selected" : ""}`}
+                onClick={() => setUserAnswer("true")}
+              >
+                {t("quiz.correct")}
+              </button>
+              <button
+                className={`boolean-item ${userAnswer === "false" ? "selected" : ""}`}
+                onClick={() => setUserAnswer("false")}
+              >
+                {t("quiz.false")}
+              </button>
+            </div>
+          )}
+
+          {currentQ.type === "fillBlank" && (
+            <input
+              className={`fill-blank-input ${userAnswer ? "has-value" : ""}`}
+              type="text"
+              placeholder={t("quiz.answerPlaceholder")}
+              value={userAnswer}
+              onChange={(e) => setUserAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && userAnswer.trim()) handleSubmit();
+              }}
+              autoFocus
+            />
+          )}
+
+          {currentQ.type === "openEnded" && (
+            <textarea
+              className="answer-input"
+              placeholder={t("quiz.openEndedPlaceholder")}
+              value={userAnswer}
+              onChange={(e) => setUserAnswer(e.target.value)}
+              rows={6}
+            />
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="quiz-actions">
+          <div className="question-error-control">
+            <button
+              className="regenerate-btn"
+              onClick={handleRegenerateQuestion}
+              disabled={isRegenerating}
+              title={t("quiz.regenerate")}
+            >
+              <RefreshCw size={14} className={isRegenerating ? "spinner" : ""} />
+              {isRegenerating ? t("quiz.regenerating") : t("quiz.regenerate")}
+            </button>
           </div>
-        )}
+          <div className="action-group">
+            <button className="skip-btn" onClick={handleSkip}>
+              <SkipForward size={14} /> {t("quiz.skip")}
+            </button>
+            <button className="submit-btn" onClick={handleSubmit} disabled={!userAnswer.trim()}>
+              <Send size={14} /> {t("quiz.submitAnswer")}
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
 
   // ==========================================
-  // Empty State: No project
+  // Main Render
   // ==========================================
+
   if (!currentProject) {
     return (
       <div className="quiz-page">
-        <div className="quiz-header">
-          <h2>知识考核</h2>
-          <p>AI 根据你的知识导图自动生成测试题目</p>
-        </div>
         <div className="quiz-empty">
           <div className="quiz-empty-icon">
             <GraduationCap size={36} />
           </div>
-          <h3>准备好测试了吗？</h3>
-          <p>AI 将基于你的思维导图内容，生成选择题、判断题和问答题， 帮你检验知识掌握程度。</p>
-          <Link to="/">
-            <button className="quiz-start-btn">先去创建项目 →</button>
+          <h3>{t("quiz.startTitle")}</h3>
+          <p>{t("quiz.startDesc")}</p>
+          <Link to="/" className="quiz-start-btn">
+            {t("quiz.goToDashboard")}
           </Link>
         </div>
       </div>
     );
   }
 
-  // ==========================================
-  // Main Quiz Page
-  // ==========================================
   return (
-    <div className="quiz-page">
+    <div className="quiz-page" onClick={() => setProjectSelectorOpen(false)}>
       {/* Header */}
-      <div className="quiz-header">
+      <div className="quiz-header" onClick={(e) => e.stopPropagation()}>
         <h2>
-          <Brain size={24} />
-          知识考核
+          <GraduationCap size={24} />
+          {t("quiz.title")}
+          {renderProjectSelector()}
         </h2>
         <p>
-          项目：{currentProject.title} — {flatNodes.length} 个知识点
+          {nodeCount} {t("quiz.knowledge")} · {t("quiz.diagnosed")} {totalQuestionsAnswered}{" "}
+          {t("quiz.times")} ·{t("quiz.overallMastery")} {formatMasteryPercentage(overallMastery)}
         </p>
       </div>
 
+      {/* Layout */}
       <div className="quiz-layout">
-        {/* Left: Node Browser + Stats */}
-        <div className="quiz-sidebar">
-          {/* Overall Mastery */}
+        {/* Left Sidebar */}
+        <aside className="quiz-sidebar">
+          {/* Mastery Overview */}
           <div className="sidebar-card mastery-overview-card">
             <div className="mastery-overview-header">
-              <BarChart3 size={16} />
-              <span>整体掌握度</span>
+              <Brain size={14} />
+              {t("quiz.overallMastery")}
             </div>
-            <div className="mastery-big-number">{formatMasteryPercentage(overallMastery)}%</div>
+            <div className="mastery-big-number">{formatMasteryPercentage(overallMastery)}</div>
             <div className="mastery-big-bar">
               <div className="mastery-big-fill" style={{ width: `${overallMastery * 100}%` }} />
             </div>
-            <div className="mastery-stats-row">
-              <span>
-                已评估: {Object.keys(currentProject.cognitiveStates || {}).length}/
-                {flatNodes.length}
-              </span>
-            </div>
+            <div className="mastery-stats-row">{t("quiz.nodesMastery", { count: nodeCount })}</div>
           </div>
 
           {/* Node Browser */}
-          <div className="sidebar-card node-browser-card">
+          <div className="sidebar-card">
             <div className="node-browser-header">
-              <BookOpen size={16} />
-              <span>选择知识点</span>
+              <Layers size={14} />
+              {t("quiz.selectNode")}
             </div>
-            <div className="node-tree-container">{renderNodeTree(currentProject.root)}</div>
+            {flatNodes.length > 0 ? (
+              <NodeBrowser
+                flatNodes={flatNodes}
+                selectedNode={selectedNode}
+                onSelectNode={handleSelectNode}
+                t={t}
+              />
+            ) : (
+              <div className="node-tree-empty">{t("quiz.mapEmpty")}</div>
+            )}
           </div>
 
-          {/* Quick Tips */}
-          <div className="sidebar-card tips-card">
+          {/* Tips */}
+          <div className="sidebar-card">
             <div className="tips-header">
-              <Target size={14} />
-              <span>考核提示</span>
+              <HelpCircle size={12} />
+              {t("quiz.tipsTitle")}
             </div>
             <ul className="tips-list">
-              <li>选择一个知识点节点开始考核</li>
-              <li>AI 会根据节点内容生成题目</li>
-              <li>问答题会由 AI 深度评估</li>
-              <li>选择/判断题自动评分</li>
+              <li>{t("quiz.tip1")}</li>
+              <li>{t("quiz.tip2")}</li>
+              <li>{t("quiz.tip3")}</li>
             </ul>
           </div>
-        </div>
+        </aside>
 
-        {/* Right: Main Content */}
-        <div className="quiz-main">
-          {/* Step: Overview (Welcome) */}
+        {/* Main Content Area */}
+        <main className="quiz-main">
+          {/* Overview View */}
           {step === "overview" && (
-            <div className="quiz-overview-view animate-fade-in">
+            <div className="quiz-overview-view">
               <div className="overview-welcome">
-                <Brain size={48} className="overview-icon" />
-                <h3>选择知识点开始考核</h3>
-                <p>
-                  从左侧导航树中选择一个知识点，AI
-                  将根据其内容生成定制化的测试题目，检验你的理解深度。
-                </p>
+                <div className="overview-icon">
+                  <GraduationCap size={48} />
+                </div>
+                <h3>{t("quiz.startTitle")}</h3>
+                <p>{t("quiz.noNodeDesc")}</p>
               </div>
 
-              {/* Tabs */}
               <div className="overview-tabs">
                 <button
                   className={`tab-btn ${activeTab === "new" ? "active" : ""}`}
                   onClick={() => setActiveTab("new")}
                 >
-                  <FileText size={16} /> 新考核
+                  <Sparkles size={16} /> {t("quiz.newAssessment")}
                 </button>
                 <button
                   className={`tab-btn ${activeTab === "history" ? "active" : ""}`}
                   onClick={() => setActiveTab("history")}
                 >
-                  <History size={16} /> 考核记录
+                  <History size={16} /> {t("quiz.history")}
                 </button>
               </div>
 
-              {activeTab === "history" && sessionHistory.length > 0 && (
-                <div className="history-list">
-                  {sessionHistory.map((session) => (
-                    <div key={session.id} className="history-card">
-                      <div className="history-header">
-                        <span className="history-node-name">{session.nodeName}</span>
-                        <span className="history-date">
-                          {new Date(session.timestamp).toLocaleDateString("zh-CN", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                      <div className="history-stats">
-                        <span>{session.questionCount} 题</span>
-                        <span className="history-mastery">
-                          掌握度: {formatMasteryPercentage(session.masteryBefore)}% →{" "}
-                          {formatMasteryPercentage(session.masteryAfter)}%
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+              {activeTab === "new" && (
+                <div className="history-empty">
+                  <HelpCircle size={40} />
+                  <p>{t("quiz.noNodeLeft")}</p>
                 </div>
               )}
 
-              {activeTab === "history" && sessionHistory.length === 0 && (
-                <div className="history-empty">
-                  <History size={24} />
-                  <p>暂无考核记录</p>
+              {activeTab === "history" && (
+                <div className="history-list">
+                  {sessionHistory.length === 0 ? (
+                    <div className="history-empty">
+                      <History size={40} />
+                      <p>{t("quiz.noHistory")}</p>
+                    </div>
+                  ) : (
+                    sessionHistory.map((rec) => (
+                      <div key={rec.id} className="history-card">
+                        <div className="history-header">
+                          <span className="history-node-name">{rec.nodeName}</span>
+                          <span className="history-date">
+                            {new Date(rec.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="history-stats">
+                          <span>
+                            {rec.questionCount} {t("quiz.submit")}
+                          </span>
+                          <span className="history-mastery">
+                            {formatMasteryPercentage(rec.masteryBefore)} →{" "}
+                            {formatMasteryPercentage(rec.masteryAfter)}
+                          </span>
+                          <span>
+                            {t("quiz.accuracy")}{" "}
+                            {Math.round(
+                              (rec.results.filter((r) => r.isCorrect).length / rec.results.length) *
+                                100,
+                            )}
+                            %
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* Step: Setup */}
+          {/* Setup View */}
           {step === "setup" && selectedNode && (
-            <div className="quiz-setup-view animate-fade-in">
+            <div className="quiz-setup-view">
               <div className="setup-breadcrumb">
-                <button className="breadcrumb-back" onClick={resetAssessment}>
-                  ← 返回
+                <button className="breadcrumb-back" onClick={() => setStep("overview")}>
+                  {t("quiz.backToOverview")}
                 </button>
                 <span className="breadcrumb-path">{selectedNodePath}</span>
               </div>
-
               <div className="setup-header">
-                <Brain size={24} className="setup-icon" />
-                <h3>考核配置：{selectedNode.content}</h3>
+                <Target size={24} className="setup-icon" />
+                <h3>{t("quiz.setupTitle", { node: selectedNode.content })}</h3>
               </div>
 
-              {/* Difficulty */}
               <div className="setup-section">
-                <label>诊断人设与要求</label>
+                <label>{t("quiz.difficultyLabel")}</label>
                 <div className="difficulty-prompt-container">
                   <textarea
                     className="difficulty-textarea"
-                    placeholder="例如：考考我最底层的实现原理，对比类似技术方案..."
                     value={difficultyPrompt}
                     onChange={(e) => setDifficultyPrompt(e.target.value)}
-                    rows={3}
+                    placeholder={t("quiz.difficultyPlaceholder")}
+                    rows={2}
                   />
                   <button
                     className={`optimize-btn ${isOptimizing ? "loading" : ""}`}
                     onClick={optimizeDifficultyPrompt}
-                    title="AI 优化指令"
+                    title={t("quiz.optimizeTooltip")}
                   >
-                    <Sparkles size={16} />
+                    <Sparkles size={14} />
                   </button>
                 </div>
                 <div className="persona-presets">
-                  {presets.map((p) => (
+                  {PRESET_KEYS.map((key) => (
                     <button
-                      key={p.label}
-                      className={`preset-btn ${difficultyPrompt === p.prompt ? "active" : ""}`}
-                      onClick={() => setDifficultyPrompt(p.prompt)}
+                      key={key}
+                      className={`preset-btn ${difficultyPrompt === PRESET_DESCRIPTION[key] ? "active" : ""}`}
+                      onClick={() => setDifficultyPrompt(PRESET_DESCRIPTION[key])}
                     >
-                      {p.label}
+                      {t(`quiz.preset${key.charAt(0).toUpperCase() + key.slice(1)}`)}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Question types */}
               <div className="setup-section">
-                <label>题型偏好（多选）</label>
+                <label>{t("quiz.allowedTypes")}</label>
                 <div className="type-selector">
-                  <button
-                    type="button"
-                    className={`type-chip auto ${allowedTypes.length === 0 ? "active" : ""}`}
-                    onClick={() => setAllowedTypes([])}
-                  >
-                    <Sparkles size={14} /> 自动
-                  </button>
-                  <button
-                    type="button"
-                    className={`type-chip ${allowedTypes.includes("openEnded") ? "active" : ""}`}
-                    onClick={() => toggleType("openEnded")}
-                  >
-                    <Send size={14} /> 问答
-                  </button>
-                  <button
-                    type="button"
-                    className={`type-chip ${allowedTypes.includes("choice") ? "active" : ""}`}
-                    onClick={() => toggleType("choice")}
-                  >
-                    <ListChecks size={14} /> 选择
-                  </button>
-                  <button
-                    type="button"
-                    className={`type-chip ${allowedTypes.includes("trueFalse") ? "active" : ""}`}
-                    onClick={() => toggleType("trueFalse")}
-                  >
-                    <HelpCircle size={14} /> 判断
-                  </button>
+                  {(["choice", "trueFalse", "openEnded", "fillBlank"] as const).map((type) => (
+                    <button
+                      key={type}
+                      className={`type-chip ${allowedTypes.includes(type) ? "active" : ""}`}
+                      onClick={() => {
+                        if (allowedTypes.includes(type)) {
+                          if (allowedTypes.length > 1) {
+                            setAllowedTypes(allowedTypes.filter((t) => t !== type));
+                          }
+                        } else {
+                          setAllowedTypes([...allowedTypes, type]);
+                        }
+                      }}
+                    >
+                      {type === "choice"
+                        ? t("quiz.typeChoice")
+                        : type === "trueFalse"
+                          ? t("quiz.typeTrueFalse")
+                          : type === "fillBlank"
+                            ? t("quiz.typeFillBlank")
+                            : t("quiz.typeOpenEnded")}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Question count */}
               <div className="setup-section">
                 <div className="section-label-group">
-                  <label>题目数量</label>
-                  <span className="count-value">
-                    {questionCount === 0 ? "AI 自动" : `${questionCount} 道`}
-                  </span>
+                  <label>{t("quiz.questionCount")}</label>
+                  <span className="count-value">{questionCount || t("quiz.auto")}</span>
                 </div>
                 <div className="count-selector-group">
                   <button
-                    type="button"
                     className={`auto-count-btn ${questionCount === 0 ? "active" : ""}`}
-                    onClick={() => setQuestionCount(questionCount === 0 ? 3 : 0)}
+                    onClick={() => setQuestionCount(0)}
                   >
-                    <Sparkles size={14} /> 自动
+                    <Sparkles size={12} /> {t("quiz.auto")}
                   </button>
                   <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    value={questionCount === 0 ? 3 : questionCount}
-                    onChange={(e) => setQuestionCount(parseInt(e.target.value))}
                     className="count-slider"
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={questionCount || 3}
+                    disabled={questionCount === 0}
+                    onChange={(e) => setQuestionCount(parseInt(e.target.value))}
                   />
                 </div>
               </div>
 
-              {/* Warnings */}
-              <div className="warnings-area">
-                <div className="warning-item token">
-                  <AlertCircle size={14} />
-                  <span>
-                    预计 Token 消耗：
-                    {questionCount === 0 ? "AI 动态确定" : questionCount > 5 ? "较高" : "正常"}
-                  </span>
+              {selectedNode && (
+                <div className="warnings-area">
+                  {selectedNode.mastery > 0.8 && (
+                    <div className="warning-item attention">
+                      <AlertTriangle size={14} />
+                      {t("quiz.highMastery", { mastery: Math.round(selectedNode.mastery * 100) })}
+                    </div>
+                  )}
+                  {selectedNode.mastery < 0.2 && (
+                    <div className="warning-item attention">
+                      <AlertTriangle size={14} />
+                      {t("quiz.lowMastery", { mastery: Math.round(selectedNode.mastery * 100) })}
+                    </div>
+                  )}
+                  {selectedNode.children.length > 0 && (
+                    <div className="warning-item">
+                      <AlertCircle size={14} />
+                      {t("quiz.subNodeCount", { count: selectedNode.children.length })}
+                    </div>
+                  )}
                 </div>
-                {(questionCount > 5 || questionCount === 0) && (
-                  <div className="warning-item attention">
-                    <Layers size={14} />
-                    <span>
-                      {questionCount === 0
-                        ? "自动模式下 AI 将生成 2-5 道题以保证诊断深度。"
-                        : "建议一次不要生成过多题目，避免 AI 注意力缺陷导致质量下降。"}
-                    </span>
-                  </div>
-                )}
-              </div>
+              )}
 
-              {error && <p className="setup-error">{error}</p>}
+              {error && <div className="setup-error">{error}</div>}
 
-              <button className="btn-primary start-btn" onClick={initAssessment}>
-                <Brain size={16} /> 启动诊断
+              <button className="start-btn" onClick={initAssessment}>
+                <Brain size={18} /> {t("quiz.startAssessment")}
               </button>
             </div>
           )}
 
-          {/* Step: Loading */}
+          {/* Loading View */}
           {step === "loading" && (
-            <div className="quiz-state-view animate-fade-in">
-              <Loader2 className="spinner" size={40} />
-              <p>AI 正在根据你的偏好构建测验模块...</p>
+            <div className="quiz-state-view">
+              <Loader2 size={32} className="spinner" />
+              <p>{t("quiz.loadingQuestions")}</p>
             </div>
           )}
 
-          {/* Step: Question */}
-          {step === "question" && questions.length > 0 && (
-            <div className="quiz-question-view animate-slide-up">
-              {/* Progress bar */}
-              <div className="quiz-progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{ width: `${(currentIndex / questions.length) * 100}%` }}
-                />
-                <span className="progress-text">
-                  第 {currentIndex + 1} / {questions.length} 题
-                </span>
-              </div>
+          {/* Question View */}
+          {step === "question" && renderQuestion()}
 
-              {/* Question content */}
-              <div className={`question-content ${isRegenerating ? "dimmed" : ""}`}>
-                {isRegenerating && (
-                  <div className="content-loader">
-                    <Loader2 className="spinner" />
-                  </div>
-                )}
-                <span className="type-badge">{questions[currentIndex].type.toUpperCase()}</span>
-                <p className="question-text">{questions[currentIndex].question}</p>
-
-                {questions[currentIndex].type === "openEnded" ? (
-                  <textarea
-                    className="answer-input"
-                    placeholder="请输入你的解答..."
-                    value={userAnswer}
-                    onChange={(e) => setUserAnswer(e.target.value)}
-                    autoFocus
-                    rows={6}
-                  />
-                ) : questions[currentIndex].type === "choice" ? (
-                  <div className="choice-list">
-                    {questions[currentIndex].options?.map((opt, i) => (
-                      <button
-                        key={i}
-                        className={`choice-item ${userAnswer === opt ? "selected" : ""}`}
-                        onClick={() => setUserAnswer(opt)}
-                      >
-                        <span className="choice-index">{String.fromCharCode(65 + i)}</span>
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="boolean-list">
-                    {["正确", "错误"].map((opt) => (
-                      <button
-                        key={opt}
-                        className={`boolean-item ${userAnswer === opt ? "selected" : ""}`}
-                        onClick={() => setUserAnswer(opt)}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="quiz-actions">
-                <div className="question-error-control">
-                  <button className="error-report-trigger" title="题目有误？">
-                    <AlertTriangle size={14} /> 题目有误
-                    <div className="error-actions-popover">
-                      <button onClick={handleRegenerateQuestion} disabled={isRegenerating}>
-                        <RefreshCw size={12} className={isRegenerating ? "spinner" : ""} /> 重新生成
-                      </button>
-                      <button onClick={handleSkipQuestion}>
-                        <SkipForward size={12} /> 跳过此题
-                      </button>
-                    </div>
-                  </button>
-                </div>
-
-                <button
-                  className="btn-primary"
-                  onClick={handleAnswerSubmit}
-                  disabled={!userAnswer.trim()}
-                >
-                  {currentIndex === questions.length - 1 ? "提交测验" : "下一题"}{" "}
-                  <ArrowRight size={16} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step: Evaluating */}
+          {/* Evaluating View */}
           {step === "evaluating" && (
-            <div className="quiz-state-view animate-fade-in">
-              <Loader2 className="spinner" size={40} />
-              <p>正在同步诊断结果...</p>
+            <div className="quiz-state-view">
+              <Loader2 size={32} className="spinner" />
+              <p>{t("quiz.evaluatingAnswer")}</p>
             </div>
           )}
 
-          {/* Step: Summary */}
-          {step === "summary" && masteryData && (
-            <div className="quiz-summary-view animate-slide-up">
-              <h3 className="summary-title">
-                <Sparkles size={20} /> 深度诊断报告
-              </h3>
-
-              {/* Mastery shift */}
-              <div className="mastery-shift-card">
-                <div className="mastery-score-group">
-                  <div className="score-item">
-                    <span className="label">评估前</span>
-                    <span className="value">{formatMasteryPercentage(masteryData.before)}%</span>
+          {/* Summary View */}
+          {step === "summary" && (
+            <div className="quiz-summary-view">
+              {masteryData && (
+                <div className="mastery-change-card">
+                  <div className="mastery-change-icon">
+                    <BarChart3 size={32} />
                   </div>
-                  <ArrowRight size={24} className="shift-arrow" />
-                  <div className="score-item after">
-                    <span className="label">评估后掌握度</span>
-                    <span className="value">{formatMasteryPercentage(masteryData.after)}%</span>
-                  </div>
-                </div>
-                <div className="mastery-progress-bar">
-                  <div className="progress-fill" style={{ width: `${masteryData.after * 100}%` }} />
-                </div>
-              </div>
-
-              {/* Dimension breakdown */}
-              <div className="diagnostic-details">
-                <div className="detail-section">
-                  <h4>
-                    <Layers size={16} /> 认知维度细分
-                  </h4>
-                  <div className="dimension-grid">
-                    {(["recall", "comprehension", "application", "analysis"] as const).map(
-                      (dim) => {
-                        const avgValue =
-                          sessionEvidences.length > 0
-                            ? sessionEvidences.reduce(
-                                (sum, ev) => sum + ((ev[dim] as number) || 0),
-                                0,
-                              ) / sessionEvidences.length
-                            : 0;
-                        const labels: Record<string, string> = {
-                          recall: "核心记忆",
-                          comprehension: "概念理解",
-                          application: "知识应用",
-                          analysis: "深度分析",
-                        };
-                        return (
-                          <div key={dim} className="dimension-item">
-                            <div className="dim-label">
-                              <span>{labels[dim]}</span>
-                              <span>{Math.round(avgValue * 100)}%</span>
-                            </div>
-                            <div className="dim-bar">
-                              <div className="dim-fill" style={{ width: `${avgValue * 100}%` }} />
-                            </div>
-                          </div>
-                        );
-                      },
-                    )}
+                  <div className="mastery-change-title">{t("quiz.masteryChange")}</div>
+                  <div className="mastery-change-values">
+                    <span className="mastery-before">
+                      {formatMasteryPercentage(masteryData.before)}
+                    </span>
+                    <ArrowRight size={20} />
+                    <span className="mastery-after">
+                      {formatMasteryPercentage(masteryData.after)}
+                    </span>
                   </div>
                 </div>
+              )}
 
-                {/* Suggestions */}
-                {sessionEvidences.some((ev) => ev.suggestion) && (
-                  <div className="detail-section highlight">
+              {/* Evidence Details */}
+              {sessionEvidences.length > 0 && (
+                <div className="summary-details">
+                  <div className="detail-section">
                     <h4>
-                      <Brain size={16} /> AI 学习建议
+                      <FileText size={14} /> {t("quiz.evalDetails")}
                     </h4>
-                    <ul className="suggestion-list">
-                      {Array.from(
-                        new Set(
-                          sessionEvidences.filter((ev) => ev.suggestion).map((ev) => ev.suggestion),
-                        ),
-                      ).map((sug, i) => (
-                        <li key={i}>{sug}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Review */}
-                <div className="detail-section review-section">
-                  <h4>
-                    <ListChecks size={16} /> 测验复盘
-                  </h4>
-                  <div className="review-list">
-                    {sessionResults.map((res, i) => (
-                      <div
-                        key={i}
-                        className={`review-card ${res.isSkipped ? "skipped" : res.isCorrect ? "correct" : "incorrect"}`}
-                      >
-                        <div className="review-header">
-                          <span className="q-index">Q{i + 1}</span>
-                          {res.isSkipped ? (
-                            <SkipForward size={16} color="var(--color-text-dim)" />
-                          ) : res.isCorrect ? (
-                            <CheckCircle2 size={16} color="var(--color-success)" />
-                          ) : (
-                            <AlertCircle size={16} color="var(--color-error)" />
-                          )}
-                        </div>
-                        <p className="review-q-text">{res.question}</p>
-                        <div className="answer-grid">
-                          <div className="answer-col">
-                            <span className="label">你的回答</span>
-                            <span
-                              className={`val ${res.isSkipped ? "dim" : res.isCorrect ? "correct" : "incorrect"}`}
-                            >
-                              {res.userAnswer}
-                            </span>
-                          </div>
-                          <div className="answer-col">
-                            <span className="label">正确答案</span>
-                            <span className="val primary">{res.correctAnswer}</span>
-                          </div>
-                        </div>
-                        {res.explanation && (
-                          <div className="review-explanation">
-                            <strong>解析：</strong>
-                            {res.explanation}
-                          </div>
-                        )}
+                    {sessionEvidences.map((ev, idx) => (
+                      <div key={idx} className="evidence-row">
+                        <span className="evidence-text">{ev.feedback}</span>
+                        <span className="evidence-confidence" title="Confidence">
+                          {`R:${Math.round(ev.recall * 100)}% C:${Math.round(ev.comprehension * 100)}%`}
+                        </span>
                       </div>
                     ))}
                   </div>
+
+                  {/* Suggestions */}
+                  {sessionEvidences.some((ev) => ev.suggestion) && (
+                    <div className="detail-section highlight">
+                      <h4>
+                        <Brain size={16} /> {t("quiz.aiSuggestions")}
+                      </h4>
+                      <ul className="suggestion-list">
+                        {Array.from(
+                          new Set(
+                            sessionEvidences
+                              .filter((ev) => ev.suggestion)
+                              .map((ev) => ev.suggestion),
+                          ),
+                        ).map((sug, i) => (
+                          <li key={i}>{sug}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Review */}
+                  <div className="detail-section review-section">
+                    <h4>
+                      <ListChecks size={16} /> {t("quiz.reviewSummary")}
+                    </h4>
+                    <div className="review-list">
+                      {sessionResults.map((res, i) => (
+                        <div
+                          key={i}
+                          className={`review-card ${res.isSkipped ? "skipped" : res.isCorrect ? "correct" : "incorrect"}`}
+                        >
+                          <div className="review-header">
+                            <span className="q-index">Q{i + 1}</span>
+                            {res.isSkipped ? (
+                              <SkipForward size={16} color="var(--color-text-dim)" />
+                            ) : res.isCorrect ? (
+                              <CheckCircle2 size={16} color="var(--color-success)" />
+                            ) : (
+                              <AlertCircle size={16} color="var(--color-error)" />
+                            )}
+                          </div>
+                          <p className="review-q-text">{res.question}</p>
+                          <div className="answer-grid">
+                            <div className="answer-col">
+                              <span className="label">{t("quiz.yourAnswer")}</span>
+                              <span
+                                className={`val ${res.isSkipped ? "dim" : res.isCorrect ? "correct" : "incorrect"}`}
+                              >
+                                {res.userAnswer}
+                              </span>
+                            </div>
+                            <div className="answer-col">
+                              <span className="label">{t("quiz.correctAnswer")}</span>
+                              <span className="val primary">{res.correctAnswer}</span>
+                            </div>
+                          </div>
+                          {res.explanation && (
+                            <div className="review-explanation">
+                              <strong>{t("quiz.explanation")}</strong>
+                              {res.explanation}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Actions */}
               <div className="summary-actions">
                 <button className="btn-secondary" onClick={resetAssessment}>
-                  <RotateCcw size={16} /> 返回概览
+                  <RotateCcw size={16} /> {t("quiz.backToOverviewBtn")}
                 </button>
                 <button
                   className="btn-primary"
@@ -1048,12 +1135,12 @@ export default function Quiz() {
                     setMasteryData(null);
                   }}
                 >
-                  <Brain size={16} /> 再次诊断「{selectedNode?.content}」
+                  <Brain size={16} /> {t("quiz.retake", { node: selectedNode?.content || "" })}
                 </button>
               </div>
             </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

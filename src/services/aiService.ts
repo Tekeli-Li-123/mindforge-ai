@@ -2,6 +2,7 @@ import { useSettingsStore, defaultAISettings } from "../stores/settingsStore";
 import { useMindMapStore } from "../stores/mindmapStore";
 import type { ProjectAIConfig, ChatMessage, MindMapNode } from "../types";
 import { flattenNodesWithPaths } from "../utils/mindmapHelpers";
+import { safeParseJson } from "../utils/jsonExtractor";
 import { detectModelCapabilities, type ModelCapabilities } from "../config/modelCapabilities";
 import type { AIProvider } from "../stores/settingsStore";
 
@@ -159,24 +160,37 @@ function buildEndpoint(baseUrl: string, caps: ModelCapabilities): string {
 /**
  * 统一解析 AI 响应，提取 content 和可选的 reasoning
  */
-function parseAIResponse(data: any, caps: ModelCapabilities): AIResponse {
+function parseAIResponse(data: unknown, caps: ModelCapabilities): AIResponse {
   // Anthropic 原生格式 (content blocks 数组)
-  if (data.type === "message" && Array.isArray(data.content)) {
-    const thinkingBlock = data.content.find((b: any) => b.type === "thinking");
-    const textBlock = data.content.find((b: any) => b.type === "text");
+  if (
+    data &&
+    typeof data === "object" &&
+    "type" in data &&
+    (data as Record<string, unknown>).type === "message" &&
+    Array.isArray((data as Record<string, unknown>).content)
+  ) {
+    const contentArray = (data as Record<string, unknown>).content as Array<
+      Record<string, unknown>
+    >;
+    const thinkingBlock = contentArray.find((b) => b.type === "thinking");
+    const textBlock = contentArray.find((b) => b.type === "text");
     return {
-      content: textBlock?.text || "",
-      reasoning: thinkingBlock?.thinking || undefined,
+      content: (textBlock?.text as string) || "",
+      reasoning: (thinkingBlock?.thinking as string) || undefined,
     };
   }
 
   // OpenAI / DeepSeek 格式
-  if (data.choices && data.choices.length > 0) {
-    const msg = data.choices[0].message;
-    return {
-      content: msg.content || "",
-      reasoning: caps.responseReasoningField ? msg[caps.responseReasoningField] : undefined,
-    };
+  if (data && typeof data === "object" && "choices" in data) {
+    const choices = (data as Record<string, unknown>).choices;
+    if (Array.isArray(choices) && choices.length > 0) {
+      const msg = choices[0].message;
+      return {
+        content: msg?.content || "",
+        reasoning:
+          caps.responseReasoningField && msg ? msg[caps.responseReasoningField] : undefined,
+      };
+    }
   }
 
   throw new Error("无法解析返回数据，格式验证失败。");
@@ -189,8 +203,8 @@ function parseAIResponse(data: any, caps: ModelCapabilities): AIResponse {
 async function fetchWithFallback(
   endpoint: string,
   headers: Record<string, string>,
-  body: Record<string, any>,
-): Promise<any> {
+  body: Record<string, unknown>,
+): Promise<unknown> {
   let response = await fetch(endpoint, {
     method: "POST",
     headers,
@@ -209,9 +223,9 @@ async function fetchWithFallback(
 
     // 恢复 developer → system（如果之前替换了的话）
     if (fallbackBody.messages) {
-      fallbackBody.messages = fallbackBody.messages.map((m: any) =>
-        m.role === "developer" ? { ...m, role: "system" } : m,
-      );
+      fallbackBody.messages = (
+        fallbackBody.messages as Array<{ role: string; content: string }>
+      ).map((m) => (m.role === "developer" ? { ...m, role: "system" } : m));
     }
 
     // 加回 temperature（之前可能被移除了）
@@ -244,7 +258,7 @@ async function fetchWithFallback(
 async function fetchStreamWithFallback(
   endpoint: string,
   headers: Record<string, string>,
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   caps: ModelCapabilities,
   onStream: (chunk: string, isReasoning: boolean) => void,
 ): Promise<AIResponse> {
@@ -261,15 +275,15 @@ async function fetchStreamWithFallback(
     const errorText = await response.text();
     console.warn("[MindForge] 流式 API 400 错误，尝试降级重试:", errorText);
 
-    const fallbackBody = { ...streamBody };
+    const fallbackBody: Record<string, any> = { ...streamBody };
     delete fallbackBody.reasoning_effort;
     delete fallbackBody.thinking;
     delete fallbackBody.effort;
 
     if (fallbackBody.messages) {
-      fallbackBody.messages = fallbackBody.messages.map((m: any) =>
-        m.role === "developer" ? { ...m, role: "system" } : m,
-      );
+      fallbackBody.messages = (
+        fallbackBody.messages as Array<{ role: string; content: string }>
+      ).map((m) => (m.role === "developer" ? { ...m, role: "system" } : m));
     }
     if (!fallbackBody.temperature) {
       fallbackBody.temperature = 0.7;
@@ -393,6 +407,7 @@ async function callAI(
   const headers = buildHeaders(provider, apiKey, caps);
   const body = buildRequestBody({
     messages,
+    provider,
     model,
     temperature,
     maxTokens,
@@ -509,17 +524,11 @@ export async function generateProjectPersona(
   const userMsg = `主题：${topic}\n项目背景：${description}\n用户特殊要求：${requirement || "无"}\n\n请生成对应的人设配置：`;
 
   const rawJson = await fetchFromAI(sysMsg, userMsg);
-  try {
-    // 简单清理下 markdown 代码块标记（如果有的话）
-    const cleanJson = rawJson
-      .replace(/```json\n?/, "")
-      .replace(/```/, "")
-      .trim();
-    return JSON.parse(cleanJson);
-  } catch (e) {
-    console.error("Failed to parse AI persona JSON", rawJson, e);
-    throw new Error("AI 返回的人设格式不正确，请重试。", { cause: e });
+  const config = safeParseJson(rawJson, null as ProjectAIConfig | null);
+  if (!config || !config.persona || !config.explainStyle) {
+    throw new Error("AI 返回的人设格式不正确，请重试。");
   }
+  return config;
 }
 
 export async function reorganizeMindMap(
@@ -614,6 +623,7 @@ ${
   const headers = buildHeaders(provider, apiKey, caps);
   const body = buildRequestBody({
     messages: allMessages,
+    provider,
     model,
     temperature,
     maxTokens,

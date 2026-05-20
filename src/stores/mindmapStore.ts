@@ -1,84 +1,201 @@
-import { create } from 'zustand';
-import type { MindMapNode, MindMapProject, ChatMessage, ProjectAIConfig, CognitiveState, CognitiveWeightConfig, ProjectCognitiveConfig } from '../types';
-import { INITIAL_COGNITIVE_STATE } from '../utils/bayesianEngine';
-
+import { create } from "zustand";
+import type {
+  MindMapNode,
+  MindMapProject,
+  ChatMessage,
+  ProjectAIConfig,
+  CognitiveState,
+  ProjectCognitiveConfig,
+} from "../types";
+import {
+  buildParentIndex,
+  updateNodeInTreeByPath,
+  deleteNodeInTreeByPath,
+  deleteNodesInTreeByPath,
+  appendChildrenInTreeByPath,
+} from "../utils/mindmapHelpers";
 // ==========================================
 // 示例数据
 // ==========================================
 const sampleProject: MindMapProject = {
-  id: 'demo-1',
-  title: '机器学习基础',
-  description: '机器学习核心概念知识导图',
+  id: "demo-1",
+  title: "机器学习基础",
+  description: "机器学习核心概念知识导图",
   createdAt: Date.now(),
   updatedAt: Date.now(),
   cognitiveConfig: {
-    preset: 'balanced'
+    preset: "balanced",
   },
   cognitiveStates: {},
   root: {
-    id: 'root',
-    content: '机器学习',
+    id: "root",
+    content: "机器学习",
     depth: 0,
     mastery: 0,
     expanded: true,
     children: [
       {
-        id: 'n1',
-        content: '监督学习',
+        id: "n1",
+        content: "监督学习",
         depth: 1,
         mastery: 0.3,
         expanded: true,
         children: [
-          { id: 'n1-1', content: '分类', depth: 2, mastery: 0.5, expanded: false, children: [
-            { id: 'n1-1-1', content: '决策树', depth: 3, mastery: 0, expanded: false, children: [] },
-            { id: 'n1-1-2', content: 'SVM', depth: 3, mastery: 0, expanded: false, children: [] },
-            { id: 'n1-1-3', content: '随机森林', depth: 3, mastery: 0, expanded: false, children: [] },
-          ]},
-          { id: 'n1-2', content: '回归', depth: 2, mastery: 0.2, expanded: false, children: [
-            { id: 'n1-2-1', content: '线性回归', depth: 3, mastery: 0, expanded: false, children: [] },
-            { id: 'n1-2-2', content: '多项式回归', depth: 3, mastery: 0, expanded: false, children: [] },
-          ]},
+          {
+            id: "n1-1",
+            content: "分类",
+            depth: 2,
+            mastery: 0.5,
+            expanded: false,
+            children: [
+              {
+                id: "n1-1-1",
+                content: "决策树",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+              { id: "n1-1-2", content: "SVM", depth: 3, mastery: 0, expanded: false, children: [] },
+              {
+                id: "n1-1-3",
+                content: "随机森林",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+            ],
+          },
+          {
+            id: "n1-2",
+            content: "回归",
+            depth: 2,
+            mastery: 0.2,
+            expanded: false,
+            children: [
+              {
+                id: "n1-2-1",
+                content: "线性回归",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+              {
+                id: "n1-2-2",
+                content: "多项式回归",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+            ],
+          },
         ],
       },
       {
-        id: 'n2',
-        content: '无监督学习',
+        id: "n2",
+        content: "无监督学习",
         depth: 1,
         mastery: 0.1,
         expanded: true,
         children: [
-          { id: 'n2-1', content: '聚类', depth: 2, mastery: 0, expanded: false, children: [
-            { id: 'n2-1-1', content: 'K-Means', depth: 3, mastery: 0, expanded: false, children: [] },
-            { id: 'n2-1-2', content: 'DBSCAN', depth: 3, mastery: 0, expanded: false, children: [] },
-          ]},
-          { id: 'n2-2', content: '降维', depth: 2, mastery: 0, expanded: false, children: [
-            { id: 'n2-2-1', content: 'PCA', depth: 3, mastery: 0, expanded: false, children: [] },
-            { id: 'n2-2-2', content: 't-SNE', depth: 3, mastery: 0, expanded: false, children: [] },
-          ]},
+          {
+            id: "n2-1",
+            content: "聚类",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [
+              {
+                id: "n2-1-1",
+                content: "K-Means",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+              {
+                id: "n2-1-2",
+                content: "DBSCAN",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+            ],
+          },
+          {
+            id: "n2-2",
+            content: "降维",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [
+              { id: "n2-2-1", content: "PCA", depth: 3, mastery: 0, expanded: false, children: [] },
+              {
+                id: "n2-2-2",
+                content: "t-SNE",
+                depth: 3,
+                mastery: 0,
+                expanded: false,
+                children: [],
+              },
+            ],
+          },
         ],
       },
       {
-        id: 'n3',
-        content: '强化学习',
+        id: "n3",
+        content: "强化学习",
         depth: 1,
         mastery: 0,
         expanded: true,
         children: [
-          { id: 'n3-1', content: 'Q-Learning', depth: 2, mastery: 0, expanded: false, children: [] },
-          { id: 'n3-2', content: '策略梯度', depth: 2, mastery: 0, expanded: false, children: [] },
-          { id: 'n3-3', content: 'Actor-Critic', depth: 2, mastery: 0, expanded: false, children: [] },
+          {
+            id: "n3-1",
+            content: "Q-Learning",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [],
+          },
+          { id: "n3-2", content: "策略梯度", depth: 2, mastery: 0, expanded: false, children: [] },
+          {
+            id: "n3-3",
+            content: "Actor-Critic",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [],
+          },
         ],
       },
       {
-        id: 'n4',
-        content: '深度学习',
+        id: "n4",
+        content: "深度学习",
         depth: 1,
         mastery: 0,
         expanded: true,
         children: [
-          { id: 'n4-1', content: 'CNN', depth: 2, mastery: 0, expanded: false, children: [] },
-          { id: 'n4-2', content: 'RNN / LSTM', depth: 2, mastery: 0, expanded: false, children: [] },
-          { id: 'n4-3', content: 'Transformer', depth: 2, mastery: 0, expanded: false, children: [] },
+          { id: "n4-1", content: "CNN", depth: 2, mastery: 0, expanded: false, children: [] },
+          {
+            id: "n4-2",
+            content: "RNN / LSTM",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [],
+          },
+          {
+            id: "n4-3",
+            content: "Transformer",
+            depth: 2,
+            mastery: 0,
+            expanded: false,
+            children: [],
+          },
         ],
       },
     ],
@@ -95,6 +212,8 @@ interface MindMapStore {
   chatMessages: ChatMessage[];
   isChatOpen: boolean;
   selectedNodeId: string | null;
+  /** 节点 ID → 父节点 ID 索引表，用于 O(depth) 树操作 */
+  nodeIndex: Record<string, string>;
 
   // Actions
   setCurrentProject: (project: MindMapProject) => void;
@@ -123,46 +242,9 @@ interface MindMapStore {
 }
 
 // ==========================================
-// Helper: 递归操作导图树
-// ==========================================
-function updateNodeInTree(node: MindMapNode, nodeId: string, updates: Partial<MindMapNode>): MindMapNode {
-  if (node.id === nodeId) {
-    return { ...node, ...updates };
-  }
-  return {
-    ...node,
-    children: node.children.map((child) => updateNodeInTree(child, nodeId, updates)),
-  };
-}
-
-function deleteNodeInTree(node: MindMapNode, nodeId: string): MindMapNode | null {
-  if (node.id === nodeId) return null; // 删除自身
-  return {
-    ...node,
-    children: node.children
-      .map((child) => deleteNodeInTree(child, nodeId))
-      .filter((child): child is MindMapNode => child !== null),
-  };
-}
-
-function appendChildrenInTree(node: MindMapNode, parentId: string, newChildren: MindMapNode[]): MindMapNode {
-  if (node.id === parentId) {
-    return {
-      ...node,
-      children: [...node.children, ...newChildren],
-      expanded: true, // 确保父节点自动展开以显示新增的子节点
-    };
-  }
-  return {
-    ...node,
-    children: node.children.map((child) => appendChildrenInTree(child, parentId, newChildren)),
-  };
-}
-
-// ==========================================
 // Zustand Store
 // ==========================================
-import { persist } from 'zustand/middleware';
+import { persist } from "zustand/middleware";
 
 export const useMindMapStore = create<MindMapStore>()(
   persist(
@@ -172,58 +254,81 @@ export const useMindMapStore = create<MindMapStore>()(
       chatMessages: [],
       isChatOpen: false,
       selectedNodeId: null,
+      nodeIndex: buildParentIndex(sampleProject.root),
 
-      setCurrentProject: (project) => set({ currentProject: project }),
+      setCurrentProject: (project) =>
+        set({
+          currentProject: project,
+          nodeIndex: project ? buildParentIndex(project.root) : {},
+        }),
 
-      addProject: (project) =>
-        set((state) => ({ projects: [...state.projects, project] })),
+      addProject: (project) => set((state) => ({ projects: [...state.projects, project] })),
 
-      updateProject: (id, updates) => set((state) => ({
-        projects: state.projects.map(p => p.id === id ? { ...p, ...updates } : p),
-        currentProject: state.currentProject?.id === id ? { ...state.currentProject, ...updates } : state.currentProject
-      })),
+      updateProject: (id, updates) =>
+        set((state) => ({
+          projects: state.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+          currentProject:
+            state.currentProject?.id === id
+              ? { ...state.currentProject, ...updates }
+              : state.currentProject,
+        })),
 
-      deleteProject: (id) => set((state) => ({
-        projects: state.projects.filter(p => p.id !== id),
-        currentProject: state.currentProject?.id === id ? null : state.currentProject
-      })),
+      deleteProject: (id) =>
+        set((state) => ({
+          projects: state.projects.filter((p) => p.id !== id),
+          currentProject: state.currentProject?.id === id ? null : state.currentProject,
+          nodeIndex: state.currentProject?.id === id ? {} : state.nodeIndex,
+        })),
 
-      duplicateProject: (id) => set((state) => {
-        const projectToCopy = state.projects.find(p => p.id === id);
-        if (!projectToCopy) return state;
+      duplicateProject: (id) =>
+        set((state) => {
+          const projectToCopy = state.projects.find((p) => p.id === id);
+          if (!projectToCopy) return state;
 
-        const newProject: MindMapProject = JSON.parse(JSON.stringify(projectToCopy));
-        newProject.id = `copy-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-        newProject.title = `${newProject.title} (副本)`;
-        newProject.createdAt = Date.now();
-        newProject.updatedAt = Date.now();
+          const newProject: MindMapProject = JSON.parse(JSON.stringify(projectToCopy));
+          newProject.id = `copy-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          newProject.title = `${newProject.title} (副本)`;
+          newProject.createdAt = Date.now();
+          newProject.updatedAt = Date.now();
 
-        return {
-          projects: [...state.projects, newProject],
-          currentProject: newProject
-        };
-      }),
+          return {
+            projects: [...state.projects, newProject],
+            currentProject: newProject,
+            nodeIndex: buildParentIndex(newProject.root),
+          };
+        }),
 
       updateNode: (nodeId, updates) =>
         set((state) => {
           if (!state.currentProject) return state;
-          const newRoot = updateNodeInTree(state.currentProject.root, nodeId, updates);
+          const newRoot = updateNodeInTreeByPath(
+            state.currentProject.root,
+            nodeId,
+            updates,
+            state.nodeIndex,
+          );
           const updatedProject = { ...state.currentProject, root: newRoot, updatedAt: Date.now() };
           return {
             currentProject: updatedProject,
-            projects: state.projects.map((p) => p.id === updatedProject.id ? updatedProject : p),
+            projects: state.projects.map((p) => (p.id === updatedProject.id ? updatedProject : p)),
+            nodeIndex: buildParentIndex(newRoot),
           };
         }),
 
       deleteNode: (nodeId) =>
         set((state) => {
           if (!state.currentProject) return state;
-          const newRoot = deleteNodeInTree(state.currentProject.root, nodeId);
+          const newRoot = deleteNodeInTreeByPath(
+            state.currentProject.root,
+            nodeId,
+            state.nodeIndex,
+          );
           if (!newRoot) return state; // 无法删除根节点
           const updatedProject = { ...state.currentProject, root: newRoot, updatedAt: Date.now() };
           return {
             currentProject: updatedProject,
-            projects: state.projects.map((p) => p.id === updatedProject.id ? updatedProject : p),
+            projects: state.projects.map((p) => (p.id === updatedProject.id ? updatedProject : p)),
+            nodeIndex: buildParentIndex(newRoot),
           };
         }),
 
@@ -231,38 +336,41 @@ export const useMindMapStore = create<MindMapStore>()(
         set((state) => {
           if (!state.currentProject || nodeIds.length === 0) return state;
 
-          const newRoot = { ...state.currentProject.root };
-          
           // If root is included, we can't delete it
-          if (nodeIds.includes(newRoot.id)) {
+          if (nodeIds.includes(state.currentProject.root.id)) {
             return state;
           }
 
-          function traverseAndDelete(node: MindMapNode) {
-            // Filter out children that are in the deletion array
-            node.children = node.children.filter(c => !nodeIds.includes(c.id));
-            
-            // Traverse remaining children
-            node.children.forEach(traverseAndDelete);
-          }
+          const newRoot = deleteNodesInTreeByPath(
+            state.currentProject.root,
+            nodeIds,
+            state.nodeIndex,
+          );
+          if (!newRoot) return state;
 
-          traverseAndDelete(newRoot);
           const newProject = { ...state.currentProject, root: newRoot, updatedAt: Date.now() };
 
           return {
-            projects: state.projects.map(p => p.id === newProject.id ? newProject : p),
-            currentProject: newProject
+            projects: state.projects.map((p) => (p.id === newProject.id ? newProject : p)),
+            currentProject: newProject,
+            nodeIndex: buildParentIndex(newRoot),
           };
         }),
 
       appendChildren: (parentId, newChildren) =>
         set((state) => {
           if (!state.currentProject) return state;
-          const newRoot = appendChildrenInTree(state.currentProject.root, parentId, newChildren);
+          const newRoot = appendChildrenInTreeByPath(
+            state.currentProject.root,
+            parentId,
+            newChildren,
+            state.nodeIndex,
+          );
           const updatedProject = { ...state.currentProject, root: newRoot, updatedAt: Date.now() };
           return {
             currentProject: updatedProject,
-            projects: state.projects.map((p) => p.id === updatedProject.id ? updatedProject : p),
+            projects: state.projects.map((p) => (p.id === updatedProject.id ? updatedProject : p)),
+            nodeIndex: buildParentIndex(newRoot),
           };
         }),
       updateProjectRoot: (projectId, newRoot) =>
@@ -273,14 +381,16 @@ export const useMindMapStore = create<MindMapStore>()(
             }
             return p;
           });
-          
-          const updatedCurrent = state.currentProject?.id === projectId 
-            ? updatedProjects.find(p => p.id === projectId) || null 
-            : state.currentProject;
+
+          const updatedCurrent =
+            state.currentProject?.id === projectId
+              ? updatedProjects.find((p) => p.id === projectId) || null
+              : state.currentProject;
 
           return {
             projects: updatedProjects,
             currentProject: updatedCurrent,
+            nodeIndex: updatedCurrent ? buildParentIndex(updatedCurrent.root) : state.nodeIndex,
           };
         }),
 
@@ -293,9 +403,10 @@ export const useMindMapStore = create<MindMapStore>()(
             return p;
           });
 
-          const updatedCurrent = state.currentProject?.id === projectId
-            ? updatedProjects.find(p => p.id === projectId) || null
-            : state.currentProject;
+          const updatedCurrent =
+            state.currentProject?.id === projectId
+              ? updatedProjects.find((p) => p.id === projectId) || null
+              : state.currentProject;
 
           return {
             projects: updatedProjects,
@@ -311,72 +422,94 @@ export const useMindMapStore = create<MindMapStore>()(
         set((state) => ({ chatMessages: [...state.chatMessages, message] })),
       clearChat: () => set({ chatMessages: [] }),
 
-      addProjectMemory: (projectId, fact) => set((state) => {
-        const projects = state.projects.map(p => {
-          if (p.id === projectId) {
-            const oldMemories = p.memories || [];
-            return { ...p, memories: [...oldMemories, fact], updatedAt: Date.now() };
-          }
-          return p;
-        });
-        const currentProject = state.currentProject?.id === projectId 
-          ? projects.find(p => p.id === projectId) || null 
-          : state.currentProject;
-        return { projects, currentProject };
-      }),
+      addProjectMemory: (projectId, fact) =>
+        set((state) => {
+          const projects = state.projects.map((p) => {
+            if (p.id === projectId) {
+              const oldMemories = p.memories || [];
+              return { ...p, memories: [...oldMemories, fact], updatedAt: Date.now() };
+            }
+            return p;
+          });
+          const currentProject =
+            state.currentProject?.id === projectId
+              ? projects.find((p) => p.id === projectId) || null
+              : state.currentProject;
+          return { projects, currentProject };
+        }),
 
-      updateProjectMemories: (projectId, memories) => set((state) => {
-        const projects = state.projects.map(p => {
-          if (p.id === projectId) {
-            return { ...p, memories, updatedAt: Date.now() };
-          }
-          return p;
-        });
-        const currentProject = state.currentProject?.id === projectId 
-          ? projects.find(p => p.id === projectId) || null 
-          : state.currentProject;
-        return { projects, currentProject };
-      }),
+      updateProjectMemories: (projectId, memories) =>
+        set((state) => {
+          const projects = state.projects.map((p) => {
+            if (p.id === projectId) {
+              return { ...p, memories, updatedAt: Date.now() };
+            }
+            return p;
+          });
+          const currentProject =
+            state.currentProject?.id === projectId
+              ? projects.find((p) => p.id === projectId) || null
+              : state.currentProject;
+          return { projects, currentProject };
+        }),
 
-      updateProjectCognitiveConfig: (projectId, config) => set((state) => {
-        const projects = state.projects.map(p => {
-          if (p.id === projectId) {
-            return { ...p, cognitiveConfig: config, updatedAt: Date.now() };
-          }
-          return p;
-        });
-        const currentProject = state.currentProject?.id === projectId 
-          ? projects.find(p => p.id === projectId) || null 
-          : state.currentProject;
-        return { projects, currentProject };
-      }),
+      updateProjectCognitiveConfig: (projectId, config) =>
+        set((state) => {
+          const projects = state.projects.map((p) => {
+            if (p.id === projectId) {
+              return { ...p, cognitiveConfig: config, updatedAt: Date.now() };
+            }
+            return p;
+          });
+          const currentProject =
+            state.currentProject?.id === projectId
+              ? projects.find((p) => p.id === projectId) || null
+              : state.currentProject;
+          return { projects, currentProject };
+        }),
 
-      updateNodeCognitiveState: (nodeId, newState) => set((state) => {
-        if (!state.currentProject) return state;
-        
-        const projectId = state.currentProject.id;
-        const cognitiveStates = { ...(state.currentProject.cognitiveStates || {}), [nodeId]: newState };
-        
-        // 计算新的掌握度 (0-1 范围)
-        const newMastery = newState.alpha / (newState.alpha + newState.beta);
-        
-        // 递归更新导图树中的节点掌握度
-        const newRoot = updateNodeInTree(state.currentProject.root, nodeId, { mastery: newMastery });
-        
-        const projects = state.projects.map(p => {
-          if (p.id === projectId) {
-            return { ...p, cognitiveStates, root: newRoot, updatedAt: Date.now() };
-          }
-          return p;
-        });
-        
-        const currentProject = { ...state.currentProject, cognitiveStates, root: newRoot, updatedAt: Date.now() };
-        
-        return { projects, currentProject };
-      }),
+      updateNodeCognitiveState: (nodeId, newState) =>
+        set((state) => {
+          if (!state.currentProject) return state;
+
+          const projectId = state.currentProject.id;
+          const cognitiveStates = {
+            ...(state.currentProject.cognitiveStates || {}),
+            [nodeId]: newState,
+          };
+
+          // 计算新的掌握度 (0-1 范围)
+          const newMastery = newState.alpha / (newState.alpha + newState.beta);
+
+          // 递归更新导图树中的节点掌握度
+          // 递归更新导图树中的节点掌握度
+          const newRoot = updateNodeInTreeByPath(
+            state.currentProject.root,
+            nodeId,
+            { mastery: newMastery },
+            state.nodeIndex,
+          );
+
+          const projects = state.projects.map((p) => {
+            if (p.id === projectId) {
+              return { ...p, cognitiveStates, root: newRoot, updatedAt: Date.now() };
+            }
+            return p;
+          });
+
+          const currentProject = {
+            ...state.currentProject,
+            cognitiveStates,
+            root: newRoot,
+            updatedAt: Date.now(),
+          };
+
+          return { projects, currentProject, nodeIndex: buildParentIndex(newRoot) };
+        }),
     }),
     {
-      name: 'mindforge-projects',
-    }
-  )
+      name: "mindforge-projects",
+      partialize: ({ nodeIndex: _ni, ...rest }) => rest,
+    },
+  ),
 );

@@ -2,14 +2,14 @@
 // MindForge AI — Type Definitions
 // ==========================================
 
-export const TYPE_SYSTEM_VERSION = '1.1.0';
+export const TYPE_SYSTEM_VERSION = "1.1.0";
 
 /** 项目级 AI 人设配置 */
 export interface ProjectAIConfig {
   /** AI 扮演的角色描述，例如 "你是一位硅谷顶尖的 AI 基础设施架构师" */
   persona: string;
   /** 解释概念时的深度风格 */
-  explainStyle: 'beginner' | 'intermediate' | 'expert';
+  explainStyle: "beginner" | "intermediate" | "expert";
   /** 自定义的解释 prompt（可选） */
   customExplainPrompt?: string;
   /** 自定义的细化 prompt（可选） */
@@ -17,10 +17,10 @@ export interface ProjectAIConfig {
 }
 
 /** 贝叶斯评估预设类型 */
-export type CognitivePreset = 'balanced' | 'theoretical' | 'practical' | 'exam';
+export type CognitivePreset = "balanced" | "theoretical" | "practical" | "exam";
 
 /** 考核难度级别 */
-export type QuizDifficulty = 'easy' | 'medium' | 'hard';
+export type QuizDifficulty = "easy" | "medium" | "hard";
 
 /** 认知评估权重配置 */
 export interface CognitiveWeightConfig {
@@ -40,11 +40,11 @@ export interface LLMEvidence {
   application: number;
   /** 能否辨析易混点或批判性思考 (0-1) */
   analysis: number;
-  
+
   /** LLM 给出的定性评估反馈 */
   feedback: string;
   /** 错误类型 */
-  errorType: 'factual' | 'conceptual' | 'logical' | 'none';
+  errorType: "factual" | "conceptual" | "logical" | "none";
   /** 针对性的学习建议 */
   suggestion: string;
 }
@@ -59,6 +59,16 @@ export interface EvidenceRecord {
   masteryAfter: number;
 }
 
+/** 置信区间 */
+export interface ConfidenceInterval {
+  /** 下限（95% 置信） */
+  lower: number;
+  /** 上限（95% 置信） */
+  upper: number;
+  /** 已收集的证据总量（α+β），反映置信度 */
+  evidenceCount: number;
+}
+
 /** 节点认知状态（贝叶斯 Beta 分布参数） */
 export interface CognitiveState {
   /** 成功权重累加值 */
@@ -69,6 +79,18 @@ export interface CognitiveState {
   lastUpdate: number;
   /** 历史证据记录 */
   evidenceHistory: EvidenceRecord[];
+  /** 置信区间（可选，由 calculateConfidenceInterval 填充） */
+  confidenceInterval?: ConfidenceInterval;
+  /** 遗忘曲线半衰期（小时），默认 168（7天） */
+  forgettingHalfLife?: number;
+}
+
+/** 遗忘曲线配置 */
+export interface ForgettingCurveConfig {
+  /** 半衰期（小时），默认 168 = 7 天 */
+  halfLifeHours: number;
+  /** 最小衰减系数（>=0 且 <=1），即使无限时间也只衰减到这个值 */
+  minDecay: number;
 }
 
 /** 导图项目级认知配置 */
@@ -76,6 +98,8 @@ export interface ProjectCognitiveConfig {
   preset: CognitivePreset;
   customWeights?: CognitiveWeightConfig;
   defaultDifficulty?: QuizDifficulty;
+  /** 遗忘曲线配置（可选） */
+  forgettingCurve?: ForgettingCurveConfig;
 }
 
 /** 思维导图节点 */
@@ -126,7 +150,7 @@ export interface MindMapProject {
 /** 聊天消息 */
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: number;
   isCompacted?: boolean;
@@ -137,14 +161,14 @@ export interface ChatMessage {
 /** 考核题目 */
 export interface QuizQuestion {
   id: string;
-  type: 'choice' | 'trueFalse' | 'fillBlank' | 'openEnded';
+  type: "choice" | "trueFalse" | "fillBlank" | "openEnded";
   question: string;
   options?: string[];
   correctAnswer?: string;
   referenceAnswer?: string;
   explanation: string;
   relatedNodeId: string;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: "easy" | "medium" | "hard";
 }
 
 /** 考核结果 */
@@ -157,4 +181,4 @@ export interface QuizResult {
 }
 
 /** 页面路由 */
-export type PageRoute = 'dashboard' | 'editor' | 'quiz' | 'settings';
+export type PageRoute = "dashboard" | "editor" | "quiz" | "settings";

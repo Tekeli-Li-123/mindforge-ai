@@ -1,144 +1,179 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Map, GraduationCap, Sparkles, BookOpen, GitBranch, Clock, Brain, Trash2, Copy, MoreVertical, Edit2 } from 'lucide-react';
-import { useMindMapStore } from '../stores/mindmapStore';
-import { countNodes, averageMastery, parseMarkdownToMindMapNode } from '../utils/mindmapHelpers';
-import { generateMindMap } from '../services/aiService';
-import type { MindMapProject } from '../types';
-import Modal from '../components/common/Modal';
-import './Dashboard.css';
+import { useState, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Map,
+  GraduationCap,
+  Sparkles,
+  BookOpen,
+  GitBranch,
+  Clock,
+  Brain,
+  Trash2,
+  Copy,
+  Edit2,
+} from "lucide-react";
+import { useMindMapStore } from "../stores/mindmapStore";
+import { useTranslation } from "../i18n";
+import { countNodes, averageMastery } from "../utils/mindmapHelpers";
+import type { MindMapProject } from "../types";
+import Modal from "../components/common/Modal";
+import "./Dashboard.css";
 
 export default function Dashboard() {
-  const { projects, addProject, setCurrentProject, updateProjectRoot, deleteProject, duplicateProject, updateProject } = useMindMapStore();
+  const { t, lang } = useTranslation();
+  const {
+    projects,
+    addProject,
+    setCurrentProject,
+    deleteProject,
+    duplicateProject,
+    updateProject,
+  } = useMindMapStore();
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjectParams, setNewProjectParams] = useState({
-    title: '',
-    description: '',
-    prompt: '',
+    title: "",
+    description: "",
+    prompt: "",
   });
 
   const handleCreateNew = () => {
     if (!newProjectParams.prompt.trim()) return;
-    
-    // Create generating placeholder immediately
+
     const projectId = `proj-${Date.now()}`;
     const generatedTitle = newProjectParams.title || newProjectParams.prompt.slice(0, 20);
     const newProject: MindMapProject = {
-       id: projectId,
-       title: generatedTitle,
-       description: newProjectParams.description,
-       createdAt: Date.now(),
-       updatedAt: Date.now(),
-       root: { 
-         id: 'root', 
-         content: newProjectParams.title || '正在思考导图结构...', 
-         depth: 0, 
-         mastery: 0, 
-         expanded: true, 
-         children: [] 
-       },
-       isGenerating: true,
-       generatingReasoning: '',
-       generationPrompt: {
-         prompt: newProjectParams.prompt,
-         title: newProjectParams.title,
-         description: newProjectParams.description,
-       }
+      id: projectId,
+      title: generatedTitle,
+      description: newProjectParams.description,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      root: {
+        id: "root",
+        content: newProjectParams.title || "",
+        depth: 0,
+        mastery: 0,
+        expanded: true,
+        children: [],
+      },
+      isGenerating: true,
+      generatingReasoning: "",
+      generationPrompt: {
+        prompt: newProjectParams.prompt,
+        title: newProjectParams.title,
+        description: newProjectParams.description,
+      },
     };
 
     addProject(newProject);
     setCurrentProject(newProject);
     setIsModalOpen(false);
-    navigate('/editor');
+    navigate("/editor");
   };
 
-  const totalNodes = projects.reduce(
-    (sum, p) => sum + countNodes(p.root),
-    0
-  );
-  const avgMastery = projects.length > 0
-    ? projects.reduce((sum, p) => sum + averageMastery(p.root), 0) / projects.length
-    : 0;
+  const { totalNodes, avgMastery, nodeCounts } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let total = 0;
+    let masterySum = 0;
+    for (const p of projects) {
+      const n = countNodes(p.root);
+      counts[p.id] = n;
+      total += n;
+      masterySum += averageMastery(p.root);
+    }
+    return {
+      totalNodes: total,
+      avgMastery: projects.length > 0 ? masterySum / projects.length : 0,
+      nodeCounts: counts,
+    };
+  }, [projects]);
 
   return (
     <div className="dashboard">
       {/* Welcome */}
       <div className="dashboard-welcome">
         <h2>
-          欢迎使用 <span className="gradient-text">MindForge AI</span> 🧠
+          {t("dashboard.title")} <span className="gradient-text">MindForge AI</span> 🧠
         </h2>
-        <p>用 AI 构建知识思维导图，一键细化、智能考核，让学习更高效</p>
+        <p>{t("dashboard.subtitle")}</p>
       </div>
 
       {/* Stats */}
       <div className="dashboard-stats">
         <div className="stat-card">
-          <div className="stat-icon purple"><BookOpen size={20} /></div>
+          <div className="stat-icon purple">
+            <BookOpen size={20} />
+          </div>
           <div className="stat-info">
             <h3>{projects.length}</h3>
-            <p>导图项目</p>
+            <p>{t("sidebar.mindmaps")}</p>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon green"><GitBranch size={20} /></div>
+          <div className="stat-icon green">
+            <GitBranch size={20} />
+          </div>
           <div className="stat-info">
             <h3>{totalNodes}</h3>
-            <p>知识节点</p>
+            <p>{t("editor.nodes")}</p>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon yellow"><Brain size={20} /></div>
+          <div className="stat-icon yellow">
+            <Brain size={20} />
+          </div>
           <div className="stat-info">
             <h3>{Math.round(avgMastery * 100)}%</h3>
-            <p>平均掌握度</p>
+            <p>{t("assessment.afterScore")}</p>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon blue"><GraduationCap size={20} /></div>
+          <div className="stat-icon blue">
+            <GraduationCap size={20} />
+          </div>
           <div className="stat-info">
             <h3>0</h3>
-            <p>已完成考核</p>
+            <p>{t("assessment.reportTitle")}</p>
           </div>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <h3 className="dashboard-section-title">快速开始</h3>
+      <h3 className="dashboard-section-title">{t("dashboard.quickStart")}</h3>
       <div className="dashboard-actions">
         <div className="action-card" onClick={() => setIsModalOpen(true)}>
           <div className="action-card-icon">
             <Sparkles size={22} />
           </div>
-          <h3>AI 生成导图</h3>
-          <p>输入任意主题，AI 自动构建完整的知识思维导图</p>
+          <h3>{t("dashboard.createFromAI")}</h3>
+          <p>{t("dashboard.quickStartDesc")}</p>
         </div>
         <Link to="/editor" className="action-card">
           <div className="action-card-icon">
             <Map size={22} />
           </div>
-          <h3>编辑导图</h3>
-          <p>打开现有导图，与 AI 对话细化节点，深入学习</p>
+          <h3>{t("dashboard.continueEditing")}</h3>
+          <p>{t("dashboard.quickStartDesc")}</p>
         </Link>
         <Link to="/quiz" className="action-card">
           <div className="action-card-icon">
             <GraduationCap size={22} />
           </div>
-          <h3>知识考核</h3>
-          <p>AI 根据导图内容自动出题，检验掌握程度</p>
+          <h3>{t("sidebar.knowledgeQuiz")}</h3>
+          <p>{t("settings.subtitle")}</p>
         </Link>
       </div>
 
       {/* Recent Projects */}
-      <h3 className="dashboard-section-title">最近项目</h3>
+      <h3 className="dashboard-section-title">{t("dashboard.title")}</h3>
       <div className="dashboard-projects">
         {projects.map((project) => (
-          <div 
-            key={project.id} 
+          <div
+            key={project.id}
             className="project-card"
             onClick={() => {
               setCurrentProject(project);
-              navigate('/editor');
+              navigate("/editor");
             }}
           >
             <div className="project-card-left">
@@ -151,43 +186,49 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="project-card-meta">
-              <span><GitBranch size={12} /> {countNodes(project.root)} 节点</span>
-              <span><Clock size={12} /> {new Date(project.updatedAt).toLocaleDateString('zh-CN')}</span>
+              <span>
+                <GitBranch size={12} /> {nodeCounts[project.id] ?? countNodes(project.root)}{" "}
+                {t("editor.nodes")}
+              </span>
+              <span>
+                <Clock size={12} />{" "}
+                {new Date(project.updatedAt).toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US")}
+              </span>
             </div>
-            
+
             <div className="project-card-actions">
-              <button 
-                className="project-action-btn" 
+              <button
+                className="project-action-btn"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const newTitle = window.prompt('请输入新的导图标题：', project.title);
-                  if (newTitle !== null && newTitle.trim() !== '') {
+                  const newTitle = window.prompt(t("dashboard.quickStart"), project.title);
+                  if (newTitle !== null && newTitle.trim() !== "") {
                     updateProject(project.id, { title: newTitle.trim() });
                   }
                 }}
-                title="重命名项目"
+                title={t("sidebar.rename")}
               >
                 <Edit2 size={16} />
               </button>
-              <button 
-                className="project-action-btn" 
+              <button
+                className="project-action-btn"
                 onClick={(e) => {
                   e.stopPropagation();
                   duplicateProject(project.id);
                 }}
-                title="创建副本"
+                title={t("sidebar.duplicate")}
               >
                 <Copy size={16} />
               </button>
-              <button 
-                className="project-action-btn delete" 
+              <button
+                className="project-action-btn delete"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (window.confirm(`确定要彻底删除“${project.title}”及其所有学习进度吗？`)) {
+                  if (window.confirm(t("dashboard.deleteConfirm", { title: project.title }))) {
                     deleteProject(project.id);
                   }
                 }}
-                title="删除项目"
+                title={t("sidebar.delete")}
               >
                 <Trash2 size={16} />
               </button>
@@ -200,49 +241,55 @@ export default function Dashboard() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="AI 智能生成知识导图"
+        title={t("dashboard.createFromAI")}
         footer={
           <>
-            <button className="modal-btn secondary" onClick={() => setIsModalOpen(false)}>取消</button>
+            <button className="modal-btn secondary" onClick={() => setIsModalOpen(false)}>
+              {t("common.cancel")}
+            </button>
             <button
               className="modal-btn primary"
               disabled={!newProjectParams.prompt.trim()}
               onClick={handleCreateNew}
             >
-              <Sparkles size={14} style={{ display: 'inline', marginRight: '4px' }} />
-              后台生成
+              <Sparkles size={14} style={{ display: "inline", marginRight: "4px" }} />
+              {t("dashboard.generate")}
             </button>
           </>
         }
       >
         <div className="modal-form-group">
-          <label className="modal-label">我想学习的主题 (Prompt)</label>
+          <label className="modal-label">{t("dashboard.topic")}</label>
           <textarea
             className="modal-textarea"
-            placeholder="例如：Python 异步编程基础、微观经济学原理解析..."
+            placeholder={t("dashboard.quickStartDesc")}
             value={newProjectParams.prompt}
             onChange={(e) => setNewProjectParams({ ...newProjectParams, prompt: e.target.value })}
             autoFocus
           />
         </div>
         <div className="modal-form-group">
-          <label className="modal-label">导图标题 (可选)</label>
+          <label className="modal-label">
+            {t("sidebar.rename")} ({t("common.cancel")})
+          </label>
           <input
             type="text"
             className="modal-input"
-            placeholder="留空则由 AI 自动生成标题"
+            placeholder={t("dashboard.topic")}
             value={newProjectParams.title}
             onChange={(e) => setNewProjectParams({ ...newProjectParams, title: e.target.value })}
           />
         </div>
         <div className="modal-form-group">
-          <label className="modal-label">学习目标 / 详细描述 (可选)</label>
+          <label className="modal-label">{t("settings.subtitle")}</label>
           <input
             type="text"
             className="modal-input"
-            placeholder="例如：侧重于实战应用，或者用于应对期末考试"
+            placeholder={t("dashboard.quickStartDesc")}
             value={newProjectParams.description}
-            onChange={(e) => setNewProjectParams({ ...newProjectParams, description: e.target.value })}
+            onChange={(e) =>
+              setNewProjectParams({ ...newProjectParams, description: e.target.value })
+            }
           />
         </div>
       </Modal>

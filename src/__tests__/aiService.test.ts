@@ -8,7 +8,7 @@ import {
   generateProjectPersona,
   reorganizeMindMap,
 } from "../services/aiService";
-import type { AIProvider } from "../stores/settingsStore";
+
 import { detectModelCapabilities } from "../config/modelCapabilities";
 
 // Mock stores

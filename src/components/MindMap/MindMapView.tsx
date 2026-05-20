@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Markmap } from "markmap-view";
-import { Transformer } from "markmap-lib";
 import {
   ZoomIn,
   ZoomOut,
@@ -19,15 +18,15 @@ import {
   FileText,
   FileJson,
   Image as ImageIcon,
-  ChevronDown,
 } from "lucide-react";
+import { useTranslation } from "../../i18n";
 import ReactMarkdown from "react-markdown";
 import Modal from "../common/Modal";
 import { useMindMapStore } from "../../stores/mindmapStore";
 import { useSettingsStore, defaultAISettings } from "../../stores/settingsStore";
 import type { MindMapNode } from "../../types";
 import {
-  findNodePath,
+  findNodePathByIndex,
   generateId,
   parseMarkdownToMindMapNode,
   decodeHTMLEntities,
@@ -38,6 +37,7 @@ import {
 } from "../../utils/mindmapHelpers";
 import ContextMenu, { type ContextMenuPosition } from "./ContextMenu";
 import AssessmentModal from "../Assessment/AssessmentModal";
+import { useToast } from "../common/Toast";
 import {
   generateMindMap,
   explainConcept,
@@ -46,15 +46,14 @@ import {
 } from "../../services/aiService";
 import "./MindMapView.css";
 
-const transformer = new Transformer();
-
 export default function MindMapView() {
+  const { t } = useTranslation();
+  const { showToast } = useToast();
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | null>(null);
   const {
     currentProject,
     updateNode,
-    deleteNode,
     deleteNodes,
     appendChildren,
     updateProjectAIConfig,
@@ -62,6 +61,7 @@ export default function MindMapView() {
     isChatOpen,
     selectNode,
     updateProject,
+    nodeIndex,
   } = useMindMapStore();
 
   // Track previous root reference to avoid unnecessary markmap re-renders
@@ -138,6 +138,7 @@ export default function MindMapView() {
 
   // Track rendering state
   const isRendering = useRef(false);
+  const renderRafRef = useRef<number | null>(null);
 
   // ---------------------------------------------------------
   // Dynamic AI Generation Effect
@@ -166,7 +167,7 @@ export default function MindMapView() {
       } else {
         accumulatedText += chunk;
         const now = Date.now();
-        // 每 1000ms 更新一次画布，避免频繁重绘卡顿
+        // Update canvas every 1000ms to avoid excessive re-renders
         if (now - lastUpdate > 1000) {
           lastUpdate = now;
           try {
@@ -197,7 +198,7 @@ export default function MindMapView() {
           isGenerating: false,
           root: {
             id: "root",
-            content: `生成失败了 😔\n${err.message}`,
+            content: t("editor.generationFailed", { msg: err.message }),
             depth: 0,
             mastery: 0,
             expanded: true,
@@ -211,9 +212,10 @@ export default function MindMapView() {
     currentProject?.isGenerating,
     currentProject?.generationPrompt,
     updateProject,
+    t,
   ]);
 
-  // Initialize and update markmap
+  // Initialize and update markmap (with adaptive animation and RAF debouncing)
   useEffect(() => {
     if (!svgRef.current || !currentProject) return;
 
@@ -229,30 +231,31 @@ export default function MindMapView() {
         const rootAST = convertToMarkmapINode(currentProject.root);
 
         if (!mmRef.current) {
+          // Adaptive duration: 0 during streaming (no lag), smooth for final render
+          const initDuration = currentProject.isGenerating ? 0 : 200;
           mmRef.current = Markmap.create(
             svgRef.current,
             {
               autoFit: false,
-              duration: 300,
+              duration: initDuration,
               maxWidth: 250,
               paddingX: 40,
-              paddingY: 30,
             },
             rootAST,
           );
         } else {
-          // Interrupt all ongoing d3 transitions to prevent NaN interpolation conflicts
-          // 但是在流式生成期间，保留原生平滑动画，不打断不强制适应
+          // During streaming: instant transitions, skip fit to avoid jarring re-centers
           if (!currentProject.isGenerating) {
             const svg = (mmRef.current as any).svg;
             if (svg && svg.selectAll) {
               svg.selectAll("*").interrupt();
             }
           }
-          await mmRef.current.setData(rootAST);
+          // Override duration on setData — 0 during streaming, smooth for final render
+          const setDataDuration = currentProject.isGenerating ? 0 : 200;
+          await mmRef.current.setData(rootAST, { duration: setDataDuration });
 
           if (prevProjectIdRef.current !== currentProject.id) {
-            // Only fit if the container has dimensions
             const { width, height } = svgRef.current.getBoundingClientRect();
             if (width > 0 && height > 0) {
               mmRef.current.fit();
@@ -267,7 +270,21 @@ export default function MindMapView() {
       }
     };
 
-    render();
+    // During streaming: debounce via requestAnimationFrame to batch rapid updates
+    if (currentProject.isGenerating) {
+      if (renderRafRef.current !== null) return; // Already queued for next frame
+      renderRafRef.current = requestAnimationFrame(() => {
+        renderRafRef.current = null;
+        render();
+      });
+    } else {
+      // Final render: cancel any pending RAF, render immediately
+      if (renderRafRef.current !== null) {
+        cancelAnimationFrame(renderRafRef.current);
+        renderRafRef.current = null;
+      }
+      render();
+    }
   }, [currentProject]);
 
   // Handle container resizing robustly
@@ -350,13 +367,13 @@ export default function MindMapView() {
   const handleExportImage = async () => {
     if (!svgRef.current) return;
 
-    // 立即关闭菜单，防止重复点击
+    // Close menu immediately to prevent double-click
     setIsExportMenuOpen(false);
 
     try {
       const svg = svgRef.current;
 
-      // 捕获当前视图尺寸
+      // Capture current view dimensions
       const bbox = svg.getBBox();
       const padding = 40;
       const width = bbox.width + padding * 2;
@@ -366,27 +383,26 @@ export default function MindMapView() {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const scale = 2; // 高清导出
+      const scale = 2; // HiDPI export
       canvas.width = width * scale;
       canvas.height = height * scale;
       ctx.scale(scale, scale);
 
-      // 1. 绘制背景
+      // 1. Draw background
       ctx.fillStyle = "#0a0a0f";
       ctx.fillRect(0, 0, width, height);
 
-      // 2. 克隆并处理 SVG 使得其自包含且符合 XML 规范
+      // 2. Clone SVG and make it self-contained
       const clonedSvg = svg.cloneNode(true) as SVGSVGElement;
       clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
       clonedSvg.setAttribute("width", width.toString());
       clonedSvg.setAttribute("height", height.toString());
-      // 设置视图框以包含所有内容
       clonedSvg.setAttribute(
         "viewBox",
         `${bbox.x - padding} ${bbox.y - padding} ${width} ${height}`,
       );
 
-      // 注入必要的全局 CSS 变量和基础样式，否则 foreignObject 里的 HTML 会丢失样式
+      // Inject global CSS variables and base styles
       const styleElement = document.createElement("style");
       styleElement.textContent = `
         .mindmap-node-box {
@@ -407,12 +423,11 @@ export default function MindMapView() {
         }
         .markmap-link { stroke: #7c5cfc; stroke-width: 2px; fill: none; opacity: 0.6; }
         .markmap-node circle { fill: #7c5cfc; stroke: #fff; stroke-width: 1px; }
-        .node-badge { display: none; } /* 导出图暂时隐藏图标 */
+        .node-badge { display: none; }
       `;
       clonedSvg.insertBefore(styleElement, clonedSvg.firstChild);
 
       const svgData = new XMLSerializer().serializeToString(clonedSvg);
-      // 使用 Base64 编码以降低“画布污染”风险，处理中文字符需用 unescape(encodeURIComponent)
       const base64Svg = window.btoa(unescape(encodeURIComponent(svgData)));
       const img = new Image();
 
@@ -420,7 +435,6 @@ export default function MindMapView() {
         ctx.drawImage(img, 0, 0, width, height);
 
         try {
-          // toDataURL 失败通常是因为 foreignObject 包含跨域资源或浏览器严格限制
           const pngUrl = canvas.toDataURL("image/png");
           const link = document.createElement("a");
           link.href = pngUrl;
@@ -428,21 +442,19 @@ export default function MindMapView() {
           link.click();
         } catch (e) {
           console.error("Canvas export security error:", e);
-          alert(
-            "导出失败：浏览器出于安全限制禁止了包含 HTML 内容的画布导出。这在 Chrome/Edge 的某些版本中很常见。您可以尝试使用 Markdown 导出或直接使用浏览器截图。",
-          );
+          showToast(t("editor.exportFailedCanvas"), "error");
         }
       };
 
       img.onerror = (e) => {
         console.error("SVG Image loading error (possibly invalid XML):", e);
-        alert("图片渲染失败。这通常是由于导图内容包含无法解析的特殊字符，请检查节点文本。");
+        showToast(t("editor.exportFailedRender"), "error");
       };
 
       img.src = "data:image/svg+xml;base64," + base64Svg;
     } catch (err: any) {
       console.error("Export critical error:", err);
-      alert("导出发生错误: " + err.message);
+      showToast(t("editor.exportFailed") + err.message, "error");
     }
   };
 
@@ -484,11 +496,8 @@ export default function MindMapView() {
   // --- Marquee Pointer Hijacking Handlers ---
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.ctrlKey || e.metaKey) {
-      // Clicking on node or dragged? Let's check if it's over a node!
-      // Actually we want to lasso from background mostly, but lassoing from above a node should work.
-      // D3 catches mousedown on SVG natively via listeners, we must stop it from propagating down in capture phase.
       e.stopPropagation();
-      e.preventDefault(); // <-- This prevents the browser from starting a native text highlight selection!
+      e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       setMarquee({
         isDrawing: true,
@@ -522,7 +531,7 @@ export default function MindMapView() {
       const rectTop = Math.min(startY, currentY);
       const rectBottom = Math.max(startY, currentY);
 
-      // Calculate intersection only if a drag actually occurred (avoiding single click intercept misfires)
+      // Calculate intersection only if a drag actually occurred
       if (rectRight - rectLeft > 5 || rectBottom - rectTop > 5) {
         const nodeBoxes = document.querySelectorAll(".mindmap-node-box");
         const newlySelected = new Set(selectedNodes);
@@ -544,7 +553,6 @@ export default function MindMapView() {
         setSelectedNodes(newlySelected);
       }
 
-      // Small timeout allows click event queue to resolve knowing marquee was active
       setTimeout(() => setMarquee(null), 10);
     }
   };
@@ -554,7 +562,6 @@ export default function MindMapView() {
     setContextMenuPos(null);
     setInlineEditor(null);
 
-    // Find if we clicked on a node box
     const target = e.target as HTMLElement;
     const nodeBox = target.closest(".mindmap-node-box");
 
@@ -574,7 +581,6 @@ export default function MindMapView() {
       const parentRect = svgRef.current?.parentElement?.getBoundingClientRect();
 
       if (parentRect) {
-        // Calculate position relative to the container
         const x = rect.left - parentRect.left;
         const y = rect.top - parentRect.top;
 
@@ -640,14 +646,13 @@ export default function MindMapView() {
       targetNodeIds.forEach((id) => updateNode(id, { children: [] }));
       setSelectedNodes(new Set());
     } else if (action === "edit" || action === "add_child") {
-      // 只能单节点编辑
       openInlineEditor(action, activeNodeId);
     } else if (action === "ai_refine") {
       setRefineConfig({
         isOpen: true,
         nodeIds: targetNodeIds,
         depth: 2,
-        maxNodes: 0, // 0 means Auto
+        maxNodes: 0,
       });
     } else if (action === "explain" || action === "explain_regen") {
       const isMulti = targetNodeIds.length > 1;
@@ -655,16 +660,18 @@ export default function MindMapView() {
 
       if (isMulti) {
         setExplanation({
-          title: isRegen ? "批量重新生成" : "批量解释",
-          content: `正在思考 ${targetNodeIds.length} 个节点的解释... ✨`,
+          title: isRegen ? t("editor.batchRegenerate") : t("editor.batchExplain"),
+          content: t("editor.thinkingForNodes", { count: String(targetNodeIds.length) }),
           isOpen: true,
         });
       } else {
-        const path = findNodePath(currentProject.root, targetNodeIds[0]);
+        const path = findNodePathByIndex(currentProject.root, targetNodeIds[0], nodeIndex);
         const targetName = path ? decodeHTMLEntities(path[path.length - 1].content) : "";
         setExplanation({
           title: targetName,
-          content: `正在${isRegen ? "重新" : ""}思考解释... ✨`,
+          content: t("editor.thinkingExplain", {
+            regen: isRegen ? t("editor.regenerate") + " " : "",
+          }),
           isOpen: true,
         });
       }
@@ -678,13 +685,13 @@ export default function MindMapView() {
         };
         findNode(currentProject.root);
 
-        const path = findNodePath(currentProject.root, tId);
+        const path = findNodePathByIndex(currentProject.root, tId, nodeIndex);
         if (!path) continue;
 
         const targetName = decodeHTMLEntities(path[path.length - 1].content);
         const contextString = decodeHTMLEntities(path.map((n) => n.content).join(" > "));
 
-        // 只有在非重新生成模式下才使用缓存
+        // Use cache only if not regenerating
         if (!isRegen && targetNodeData?.explanation) {
           combinedExp += `### ${targetName}\n${targetNodeData.explanation}\n\n`;
           continue;
@@ -698,23 +705,23 @@ export default function MindMapView() {
           }
           updateNode(tId, { explanation: result, tags: currentTags });
           combinedExp += `### ${targetName}\n${result}\n\n`;
-          // 更新临时弹窗状态以显示进度
           if (isMulti)
             setExplanation({
-              title: "批量解释 (处理中)",
-              content: combinedExp + "\n*处理下一个... ✨*",
+              title: t("editor.batchExplain"),
+              content: combinedExp + "\n*" + t("editor.processingNext") + "... ✨*",
               isOpen: true,
             });
         } catch (e: any) {
-          combinedExp += `### ${targetName}\n解释失败 😔\n${e.message}\n\n`;
+          combinedExp += `### ${targetName}\n${t("editor.explainFailed")}\n${e.message}\n\n`;
         }
       }
       const finalTitle = isMulti
         ? isRegen
-          ? "批量重构结果"
-          : "批量解释结果"
+          ? t("editor.batchReorganizeResult")
+          : t("editor.batchExplainResult")
         : decodeHTMLEntities(
-            findNodePath(currentProject.root, targetNodeIds[0])?.slice(-1)[0]?.content || "",
+            findNodePathByIndex(currentProject.root, targetNodeIds[0], nodeIndex)?.slice(-1)[0]
+              ?.content || "",
           );
       setExplanation({ title: finalTitle, content: combinedExp, isOpen: true });
     } else if (action === "reorganize") {
@@ -729,11 +736,11 @@ export default function MindMapView() {
         findNode(currentProject.root);
 
         if (!targetNodeData || targetNodeData.children.length === 0) {
-          if (targetNodeIds.length === 1) alert("当前节点没有任何子节点，无法重组。");
+          if (targetNodeIds.length === 1) showToast(t("editor.noChildrenToReorganize"), "warning");
           continue;
         }
 
-        const path = findNodePath(currentProject.root, tId);
+        const path = findNodePathByIndex(currentProject.root, tId, nodeIndex);
         const targetName = path ? decodeHTMLEntities(path[path.length - 1].content) : "";
         const contextString = path
           ? decodeHTMLEntities(path.map((n) => n.content).join(" > "))
@@ -744,7 +751,7 @@ export default function MindMapView() {
           childrenMarkdown += nodeToMarkdown(c, 1, true);
         });
 
-        updateNode(tId, { content: targetName + " (✨ 施展魔法重组中...)" });
+        updateNode(tId, { content: targetName + t("editor.reorganizing") });
 
         try {
           const markdown = await reorganizeMindMap(childrenMarkdown, contextString);
@@ -753,13 +760,14 @@ export default function MindMapView() {
 
           updateNode(tId, { content: targetName, children: parsedTree.children });
         } catch (e: any) {
-          if (targetNodeIds.length === 1) alert("AI 重组失败: " + e.message);
+          if (targetNodeIds.length === 1)
+            showToast(t("editor.reorganizeFailed") + e.message, "error");
           updateNode(tId, { content: targetName });
         }
       }
       setIsAiLoading(false);
     } else if (action === "assessment") {
-      const path = findNodePath(currentProject.root, activeNodeId);
+      const path = findNodePathByIndex(currentProject.root, activeNodeId, nodeIndex);
       if (path) {
         setAssessmentState({
           isOpen: true,
@@ -772,22 +780,22 @@ export default function MindMapView() {
 
   const executeAiRefine = async () => {
     if (!refineConfig || !currentProject) return;
-    const { nodeIds, depth, maxNodes } = refineConfig;
+    const { nodeIds, maxNodes } = refineConfig;
 
     setRefineConfig(null);
     setIsAiLoading(true);
 
     const originalNames: Record<string, string> = {};
     for (const nId of nodeIds) {
-      const path = findNodePath(currentProject.root, nId);
+      const path = findNodePathByIndex(currentProject.root, nId, nodeIndex);
       if (!path) continue;
       const targetName = decodeHTMLEntities(path[path.length - 1].content);
       originalNames[nId] = targetName;
-      updateNode(nId, { content: targetName + " (✨ 细化中...)" });
+      updateNode(nId, { content: targetName + t("editor.refining") });
     }
 
     for (const nId of nodeIds) {
-      const path = findNodePath(currentProject.root, nId);
+      const path = findNodePathByIndex(currentProject.root, nId, nodeIndex);
       if (!path) continue;
 
       const targetName = originalNames[nId] || decodeHTMLEntities(path[path.length - 1].content);
@@ -798,8 +806,8 @@ export default function MindMapView() {
           useSettingsStore.getState().aiSettings.refinePrompt || defaultAISettings.refinePrompt;
         const limitInstruction =
           maxNodes === 0
-            ? `严格限制：必须且只能生成 1 层深度的直接下级概念列表。子节点数量由你**自行判断**，找出涵盖该概念精髓所需的必要、合理的分类数即可，但绝对不要生成更深层级的次级节点！`
-            : `严格限制：必须且只能生成 1 层深度的直接下级概念列表，节点数量最多不超过 ${maxNodes} 个。绝对不要生成更深层级的次级节点！`;
+            ? `Strictly limited: generate only 1 level of direct subordinate concepts. The number of child nodes is for you to **judge** — find the necessary and reasonable number of categories to cover the essence of the concept. Absolutely do NOT generate deeper sub-nodes!`
+            : `Strictly limited: generate only 1 level of direct subordinate concepts, max ${maxNodes} nodes. Absolutely do NOT generate deeper sub-nodes!`;
 
         const compiledPrompt = refinePrompt
           .replace(/\{\{target\}\}/g, targetName)
@@ -807,11 +815,11 @@ export default function MindMapView() {
           .replace(/\{\{limitInstruction\}\}/g, limitInstruction);
 
         const persona = currentProject.aiConfig?.persona || "";
-        const personaPrefix = persona ? `你的人设是：${persona}\n\n` : "";
+        const personaPrefix = persona ? `Your persona is: ${persona}\n\n` : "";
 
         let accumulatedText = "";
         let lastUpdate = Date.now();
-        const existingNode = findNodePath(currentProject.root, nId)?.pop();
+        const existingNode = findNodePathByIndex(currentProject.root, nId, nodeIndex)?.pop();
         const existingChildren = existingNode?.children || [];
 
         const parseFlatMarkdown = (md: string) => {
@@ -840,7 +848,7 @@ export default function MindMapView() {
             prompt: compiledPrompt,
             systemPromptOverride:
               personaPrefix +
-              "你是一个严格执行命令的分类提取器。你的任务仅仅是为一个概念提取出它的『直接分类或特征』。极其重要：每次只能生成 1 层扁平列表！请必须使用 Markdown 无序列表（- 或 *）来直接罗列，绝对不可使用 # 标题进行深度嵌套树化，不要任何解释。",
+              "You are a strict classification extractor that follows commands. Your only task is to extract 'direct categories or characteristics' for a given concept. Critically important: always generate only 1 level flat list! Use Markdown unordered list (- or *) to list items directly. Never use # headings for deep nesting. No explanations.",
           },
           (chunk, isReasoning) => {
             if (isReasoning) {
@@ -857,12 +865,11 @@ export default function MindMapView() {
           },
         );
 
-        // 最终更新
         const finalSubNodes = parseFlatMarkdown(markdown);
         updateNode(nId, { content: targetName, children: [...existingChildren, ...finalSubNodes] });
         setLocalGeneratingReasoning("");
       } catch (e: any) {
-        if (nodeIds.length === 1) alert("AI 细化失败: " + e.message);
+        if (nodeIds.length === 1) showToast(t("editor.refineFailed") + e.message, "error");
         updateNode(nId, { content: targetName });
       }
     }
@@ -876,7 +883,7 @@ export default function MindMapView() {
           <div className="mindmap-empty-icon">
             <Map size={28} />
           </div>
-          <p>尚未打开导图项目，请从仪表盘选择或创建新导图</p>
+          <p>{t("editor.noProject")}</p>
         </div>
       </div>
     );
@@ -899,12 +906,14 @@ export default function MindMapView() {
           <div className="generation-spinner">
             <Sparkles className="spin-icon" size={20} />
             <span>
-              {currentProject?.isGenerating ? "AI 正在动态构建导图..." : "AI 正在思考中..."}
+              {currentProject?.isGenerating ? t("editor.generatingMap") : t("editor.thinking")}
             </span>
           </div>
           {localGeneratingReasoning && (
             <details className="generation-reasoning" open>
-              <summary>💭 正在深度思考 ({localGeneratingReasoning.length} 字符)...</summary>
+              <summary>
+                {t("editor.thinkingLabel", { count: String(localGeneratingReasoning.length) })}
+              </summary>
               <div className="reasoning-content">
                 <ReactMarkdown>{localGeneratingReasoning}</ReactMarkdown>
               </div>
@@ -922,17 +931,17 @@ export default function MindMapView() {
 
       {/* Toolbar */}
       <div className="mindmap-toolbar">
-        <button className="mindmap-toolbar-btn" onClick={handleZoomIn} title="放大">
+        <button className="mindmap-toolbar-btn" onClick={handleZoomIn} title={t("editor.zoomIn")}>
           <ZoomIn size={18} />
         </button>
-        <button className="mindmap-toolbar-btn" onClick={handleZoomOut} title="缩小">
+        <button className="mindmap-toolbar-btn" onClick={handleZoomOut} title={t("editor.zoomOut")}>
           <ZoomOut size={18} />
         </button>
         <div className="mindmap-toolbar-divider" />
-        <button className="mindmap-toolbar-btn" onClick={handleFit} title="适应窗口">
+        <button className="mindmap-toolbar-btn" onClick={handleFit} title={t("editor.fitWindow")}>
           <Maximize2 size={18} />
         </button>
-        <button className="mindmap-toolbar-btn" title="重置" onClick={() => {}}>
+        <button className="mindmap-toolbar-btn" title={t("editor.reset")} onClick={() => {}}>
           <RotateCcw size={18} />
         </button>
         <div className="mindmap-toolbar-divider" />
@@ -943,7 +952,7 @@ export default function MindMapView() {
             setTempPersona(currentProject.aiConfig?.persona || "");
             setIsAiConfigOpen(true);
           }}
-          title="项目 AI 人设设定"
+          title={t("editor.aiConfig")}
         >
           <Brain size={18} />
         </button>
@@ -952,7 +961,7 @@ export default function MindMapView() {
           <button
             className={`mindmap-toolbar-btn ${isExportMenuOpen ? "active" : ""}`}
             onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-            title="导出导图"
+            title={t("editor.export")}
           >
             <Download size={18} />
           </button>
@@ -961,15 +970,15 @@ export default function MindMapView() {
             <div className="mindmap-export-menu glass animate-fade-in">
               <div className="export-menu-item" onClick={handleExportMarkdown}>
                 <FileText size={16} />
-                <span>导出为 Markdown (.md)</span>
+                <span>{t("editor.exportAsMarkdown")}</span>
               </div>
               <div className="export-menu-item" onClick={handleExportJSON}>
                 <FileJson size={16} />
-                <span>导出为 JSON (.json)</span>
+                <span>{t("editor.exportAsJSON")}</span>
               </div>
               <div className="export-menu-item" onClick={handleExportImage}>
                 <ImageIcon size={16} />
-                <span>导出为图片 (.png)</span>
+                <span>{t("editor.exportAsPNG")}</span>
               </div>
             </div>
           )}
@@ -979,7 +988,7 @@ export default function MindMapView() {
           className={`mindmap-toolbar-btn ${isChatOpen ? "active" : ""}`}
           style={{ color: isChatOpen ? "var(--color-accent)" : "inherit" }}
           onClick={toggleChat}
-          title="打开/关闭 AI 助手"
+          title={t("editor.toggleChat")}
         >
           <MessageSquare size={18} />
         </button>
@@ -1107,14 +1116,14 @@ export default function MindMapView() {
           }}
         >
           <Sparkles style={{ width: 14, height: 14, flexShrink: 0 }} className="animate-spin" />
-          AI 正在思考处理中...
+          {t("editor.aiThinking")}
         </div>
       )}
 
       <Modal
         isOpen={explanation?.isOpen || false}
         onClose={() => setExplanation((e) => (e ? { ...e, isOpen: false } : null))}
-        title={`词条解释：${explanation?.title}`}
+        title={`${t("editor.explanationTitle")}${explanation?.title}`}
         footer={
           <div style={{ display: "flex", gap: "8px", width: "100%", justifyContent: "flex-end" }}>
             <button
@@ -1125,13 +1134,13 @@ export default function MindMapView() {
                 if (targetId) handleAction("explain_regen");
               }}
             >
-              <RotateCw style={{ width: 14, height: 14, flexShrink: 0 }} /> 重新生成
+              <RotateCw style={{ width: 14, height: 14, flexShrink: 0 }} /> {t("editor.regenerate")}
             </button>
             <button
               className="modal-btn primary"
               onClick={() => setExplanation((e) => (e ? { ...e, isOpen: false } : null))}
             >
-              阅毕
+              {t("editor.readDone")}
             </button>
           </div>
         }
@@ -1154,11 +1163,11 @@ export default function MindMapView() {
       <Modal
         isOpen={refineConfig?.isOpen || false}
         onClose={() => setRefineConfig(null)}
-        title="AI 节点发散提取"
+        title={t("editor.refineTitle")}
         footer={
           <>
             <button className="modal-btn secondary" onClick={() => setRefineConfig(null)}>
-              取消
+              {t("editor.cancel")}
             </button>
             <button
               className="modal-btn primary"
@@ -1175,7 +1184,7 @@ export default function MindMapView() {
               onClick={executeAiRefine}
             >
               <Sparkles size={16} style={{ width: "16px", height: "16px", flex: "0 0 16px" }} />{" "}
-              <span>单层发散</span>
+              <span>{t("editor.singleLayer")}</span>
             </button>
           </>
         }
@@ -1190,7 +1199,7 @@ export default function MindMapView() {
                 justifyContent: "space-between",
               }}
             >
-              <span>发散提取数量 (Max Nodes)</span>
+              <span>{t("editor.maxNodes")}</span>
               <span
                 style={{
                   color:
@@ -1199,7 +1208,9 @@ export default function MindMapView() {
                       : "var(--color-accent)",
                 }}
               >
-                {refineConfig?.maxNodes === 0 ? "自动 (Auto)" : `${refineConfig?.maxNodes} 个`}
+                {refineConfig?.maxNodes === 0
+                  ? t("editor.auto")
+                  : `${refineConfig?.maxNodes} ${t("editor.nodes")}`}
               </span>
             </label>
             <input
@@ -1221,9 +1232,7 @@ export default function MindMapView() {
               }}
             />
             <span style={{ fontSize: "12px", color: "var(--color-text-tertiary)" }}>
-              {refineConfig?.maxNodes === 0
-                ? "由 AI 自动评估当前知识点，提取出最合适合理的分类数量。"
-                : "控制本次要向下提取出多少个同级的直接细分子类/知识点。"}
+              {refineConfig?.maxNodes === 0 ? t("editor.autoDesc") : t("editor.manualDesc")}
             </span>
           </div>
         </div>
@@ -1233,11 +1242,11 @@ export default function MindMapView() {
       <Modal
         isOpen={isAiConfigOpen}
         onClose={() => setIsAiConfigOpen(false)}
-        title="当前项目 AI 人设设定"
+        title={t("editor.aiConfigTitle")}
         footer={
           <>
             <button className="modal-btn secondary" onClick={() => setIsAiConfigOpen(false)}>
-              取消
+              {t("editor.cancel")}
             </button>
             <button
               className="modal-btn primary"
@@ -1249,7 +1258,7 @@ export default function MindMapView() {
                 setIsAiConfigOpen(false);
               }}
             >
-              保存设定
+              {t("editor.save")}
             </button>
           </>
         }
@@ -1260,7 +1269,7 @@ export default function MindMapView() {
               <label
                 style={{ fontSize: "14px", fontWeight: 500, color: "var(--color-text-secondary)" }}
               >
-                AI 专家人设描述 (Persona)
+                {t("editor.personaLabel")}
               </label>
               <button
                 onClick={async () => {
@@ -1274,7 +1283,7 @@ export default function MindMapView() {
                     setTempPersona(config.persona);
                     updateProjectAIConfig(currentProject.id, config);
                   } catch (e: any) {
-                    alert("智能生成失败: " + e.message);
+                    showToast(t("editor.genPersonaFailed") + e.message, "error");
                   } finally {
                     setIsPersonaGenerating(false);
                   }
@@ -1298,13 +1307,15 @@ export default function MindMapView() {
                   className={isPersonaGenerating ? "animate-spin" : ""}
                 />
                 <span style={{ whiteSpace: "nowrap" }}>
-                  {isPersonaGenerating ? "正在炼丹..." : "AI 智能生成"}
+                  {isPersonaGenerating
+                    ? t("editor.personaGenerateLoading")
+                    : t("editor.personaGenerate")}
                 </span>
               </button>
             </div>
             <textarea
               className="modal-textarea"
-              placeholder="例如：你是一位拥有 10 年经验的资深架构师，回答严谨且深入底层。"
+              placeholder={t("editor.personaPlaceholder")}
               value={tempPersona}
               onChange={(e) => setTempPersona(e.target.value)}
               style={{
@@ -1323,8 +1334,8 @@ export default function MindMapView() {
                 gap: "6px",
               }}
             >
-              <HelpCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> 人设将深度影响 AI
-              的“解释概念”和“发散细化”的语气与专业程度。
+              <HelpCircle style={{ width: 14, height: 14, flexShrink: 0 }} />{" "}
+              {t("editor.personaHint")}
             </span>
           </div>
 
@@ -1332,7 +1343,7 @@ export default function MindMapView() {
             <label
               style={{ fontSize: "14px", fontWeight: 500, color: "var(--color-text-secondary)" }}
             >
-              默认知识深度 (Explain Style)
+              {t("editor.explainStyle")}
             </label>
             <div
               style={{
@@ -1370,7 +1381,11 @@ export default function MindMapView() {
                     transition: "all 0.2s",
                   }}
                 >
-                  {style === "beginner" ? "入门" : style === "intermediate" ? "进阶" : "专家"}
+                  {style === "beginner"
+                    ? t("editor.beginner")
+                    : style === "intermediate"
+                      ? t("editor.intermediate")
+                      : t("editor.expert")}
                 </button>
               ))}
             </div>

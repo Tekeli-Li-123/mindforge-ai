@@ -3,9 +3,14 @@ import {
   updateCognitiveState,
   calculateMastery,
   calculateProxyEvidence,
+  calculateConfidenceInterval,
+  applyForgettingCurve,
+  describeMastery,
+  formatMasteryPercentage,
   INITIAL_COGNITIVE_STATE,
   ASSESSMENT_PRESETS,
 } from "../utils/bayesianEngine";
+import type { CognitiveState } from "../types";
 
 describe("calculateMastery", () => {
   it("should return correct mastery for alpha=2, beta=8", () => {
@@ -69,7 +74,7 @@ describe("updateCognitiveState", () => {
       suggestion: "Review more",
     };
 
-    const { newState, masteryBefore, masteryAfter } = updateCognitiveState(
+    const { masteryBefore, masteryAfter } = updateCognitiveState(
       { alpha: 10, beta: 2, lastUpdate: Date.now(), evidenceHistory: [] },
       evidence,
       ASSESSMENT_PRESETS.balanced,
@@ -155,6 +160,102 @@ describe("calculateProxyEvidence", () => {
     const easyEvidence = calculateProxyEvidence(true, "easy");
     const hardEvidence = calculateProxyEvidence(true, "hard");
     expect(hardEvidence.recall).toBeGreaterThan(easyEvidence.recall);
+  });
+
+  it("should reduce scores for multiple choice (guessing factor)", () => {
+    const openEvidence = calculateProxyEvidence(true, "medium", false);
+    const choiceEvidence = calculateProxyEvidence(true, "medium", true);
+    expect(choiceEvidence.recall).toBeLessThan(openEvidence.recall);
+    expect(choiceEvidence.comprehension).toBeLessThan(openEvidence.comprehension);
+  });
+});
+
+describe("calculateConfidenceInterval", () => {
+  it("should produce a valid interval for normal state", () => {
+    const ci = calculateConfidenceInterval(10, 5);
+    expect(ci.lower).toBeGreaterThanOrEqual(0);
+    expect(ci.upper).toBeLessThanOrEqual(1);
+    expect(ci.lower).toBeLessThan(ci.upper);
+    expect(ci.evidenceCount).toBe(15);
+  });
+
+  it("should return [0,1] for no evidence", () => {
+    const ci = calculateConfidenceInterval(0, 0);
+    expect(ci.lower).toBe(0);
+    expect(ci.upper).toBe(1);
+    expect(ci.evidenceCount).toBe(0);
+  });
+
+  it("should narrow interval with more evidence", () => {
+    const smallCi = calculateConfidenceInterval(2, 2);
+    const largeCi = calculateConfidenceInterval(20, 20);
+    // Both have same mastery (0.5) but larger n should give narrower CI
+    const smallWidth = smallCi.upper - smallCi.lower;
+    const largeWidth = largeCi.upper - largeCi.lower;
+    expect(largeWidth).toBeLessThan(smallWidth);
+  });
+});
+
+describe("applyForgettingCurve", () => {
+  it("should not decay when elapsed is 0", () => {
+    const state: CognitiveState = {
+      alpha: 10,
+      beta: 5,
+      lastUpdate: Date.now(),
+      evidenceHistory: [],
+    };
+    const result = applyForgettingCurve(state, Date.now());
+    expect(result.effectiveAlpha).toBeCloseTo(10, 2);
+    expect(result.effectiveBeta).toBeCloseTo(5, 2);
+    expect(result.decayFactor).toBe(1);
+  });
+
+  it("should decay after significant time has passed", () => {
+    const state: CognitiveState = {
+      alpha: 10,
+      beta: 5,
+      lastUpdate: Date.now(),
+      evidenceHistory: [],
+      forgettingHalfLife: 1, // 1 hour half-life for quick test
+    };
+    // Simulate 2 half-lives elapsed (2 hours)
+    const future = state.lastUpdate + 2 * 3600 * 1000;
+    const result = applyForgettingCurve(state, future);
+    expect(result.decayFactor).toBeLessThan(0.6);
+    expect(result.decayFactor).toBeGreaterThan(0.2);
+    expect(result.effectiveAlpha).toBeLessThan(10);
+  });
+
+  it("should not decay below minDecay", () => {
+    const state: CognitiveState = {
+      alpha: 10,
+      beta: 5,
+      lastUpdate: Date.now(),
+      evidenceHistory: [],
+      forgettingHalfLife: 1,
+    };
+    // Simulate very long time elapsed
+    const future = state.lastUpdate + 1000 * 3600 * 1000;
+    const result = applyForgettingCurve(state, future, 0.3);
+    expect(result.decayFactor).toBeGreaterThanOrEqual(0.29);
+    expect(result.decayFactor).toBeLessThanOrEqual(0.31);
+  });
+});
+
+describe("describeMastery", () => {
+  it("should produce a formatted string", () => {
+    const desc = describeMastery(10, 5);
+    expect(desc).toContain("%");
+    expect(desc).toContain("["); // contains CI
+    expect(desc).toContain("n=");
+  });
+});
+
+describe("formatMasteryPercentage", () => {
+  it("should convert mastery to percentage integer", () => {
+    expect(formatMasteryPercentage(0.5)).toBe(50);
+    expect(formatMasteryPercentage(0.999)).toBe(100);
+    expect(formatMasteryPercentage(0.001)).toBe(0);
   });
 });
 

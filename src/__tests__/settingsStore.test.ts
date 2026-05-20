@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { useSettingsStore, defaultAISettings } from "../stores/settingsStore";
 import type { AIProvider } from "../stores/settingsStore";
 
@@ -177,7 +177,6 @@ describe("settingsStore", () => {
       // The persist middleware should hydrate from localStorage
       // Note: zustand/persist hydrates asynchronously by default
       // So we check that the persist config exists
-      const { aiSettings } = useSettingsStore.getState();
       // After reset, it's back to defaults because we called resetStore manually
       // The persist middleware will rehydrate on next tick
       // For this test we verify the key exists in localStorage

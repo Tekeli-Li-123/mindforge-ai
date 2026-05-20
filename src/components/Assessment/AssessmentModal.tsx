@@ -22,9 +22,11 @@ import {
   ASSESSMENT_PRESETS,
   calculateProxyEvidence,
   INITIAL_COGNITIVE_STATE,
+  calculateConfidenceInterval,
 } from "../../utils/bayesianEngine";
 import { useMindMapStore } from "../../stores/mindmapStore";
 import type { MindMapNode, QuizQuestion, LLMEvidence, CognitiveState } from "../../types";
+import { useTranslation } from "../../i18n";
 import "./AssessmentModal.css";
 
 interface AssessmentModalProps {
@@ -42,15 +44,15 @@ export default function AssessmentModal({
   node,
   contextPath,
 }: AssessmentModalProps) {
+  const { t } = useTranslation();
   const { currentProject, updateNodeCognitiveState } = useMindMapStore();
 
   const [step, setStep] = useState<Step>("setup");
-  const [difficultyPrompt, setDifficultyPrompt] = useState("进阶水平：侧重概念的理解与简单应用。");
+  const [difficultyPrompt, setDifficultyPrompt] = useState(t("assessment.presetMedium"));
   const [questionCount, setQuestionCount] = useState(3);
-  const [allowedTypes, setAllowedTypes] = useState<("choice" | "trueFalse" | "openEnded")[]>([
-    "openEnded",
-    "choice",
-  ]);
+  const [allowedTypes, setAllowedTypes] = useState<
+    ("choice" | "trueFalse" | "openEnded" | "fillBlank")[]
+  >(["openEnded", "choice"]);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
@@ -73,16 +75,16 @@ export default function AssessmentModal({
 
   const presets = [
     {
-      label: "👶 基础入门",
-      prompt: "基础水平：侧重核心定义、基本概念的准确回忆，用通俗易懂的方式出题。",
+      label: t("assessment.presetBeginner"),
+      prompt: t("assessment.presetBeginnerPrompt"),
     },
     {
-      label: "💼 面试模拟",
-      prompt: "面试官人设：模拟大厂社招架构师面试提问，侧重技术选型对比与实际落地瓶颈分析。",
+      label: t("assessment.presetInterview"),
+      prompt: t("assessment.presetInterviewPrompt"),
     },
     {
-      label: "🎓 专家深挖",
-      prompt: "专家水平：侧重深度分析、逻辑辨析与底层原理，考查知识点的深度关联。",
+      label: t("assessment.presetExpert"),
+      prompt: t("assessment.presetExpertPrompt"),
     },
   ];
 
@@ -98,14 +100,13 @@ export default function AssessmentModal({
       }, 0);
       return () => clearTimeout(t);
     }
-  }, [isOpen, node?.id]); // 修正：仅在项目开启或切换节点时重置，避免更新掌握度时因 node 对象引用变化导致重置
+  }, [isOpen, node?.id]);
 
   const optimizeDifficultyPrompt = async () => {
     if (!difficultyPrompt.trim()) return;
     setIsOptimizing(true);
     try {
-      const systemMsg =
-        "你是一个 Prompt 优化专家。请将用户简单的考核要求转化为一段专业的、具有人设色彩的教育评估指令。输出要简洁有力（50字以内）。只输出优化后的文本。";
+      const systemMsg = t("assessment.optimizeSystemMsg");
       const optimized = await AssessmentService.optimizePrompt(difficultyPrompt, systemMsg);
       setDifficultyPrompt(optimized);
     } catch (err) {
@@ -130,7 +131,7 @@ export default function AssessmentModal({
       setCurrentIndex(0);
       setStep("question");
     } catch (err: any) {
-      setError(err.message || "无法生成题目");
+      setError(err.message || t("assessment.generateError"));
       setStep("setup");
     }
   };
@@ -146,7 +147,9 @@ export default function AssessmentModal({
         contextPath,
         currentQ.question,
         difficultyPrompt,
-        allowedTypes.length === 0 ? ["choice", "trueFalse", "openEnded"] : allowedTypes,
+        allowedTypes.length === 0
+          ? ["choice", "trueFalse", "openEnded", "fillBlank"]
+          : allowedTypes,
       );
 
       const newQuestions = [...questions];
@@ -154,7 +157,7 @@ export default function AssessmentModal({
       setQuestions(newQuestions);
       setUserAnswer("");
     } catch (err: any) {
-      setError("重新生成失败：" + err.message);
+      setError(t("assessment.regenerateError") + err.message);
     } finally {
       setIsRegenerating(false);
     }
@@ -163,18 +166,18 @@ export default function AssessmentModal({
   const handleSkipQuestion = () => {
     const currentQ = questions[currentIndex];
 
-    // 记录跳过结果
     setSessionResults((prev) => [
       ...prev,
       {
         question: currentQ.question,
         type: currentQ.type,
-        userAnswer: "（用户已跳过此题）",
+        userAnswer: t("assessment.skipped"),
         correctAnswer:
-          currentQ.correctAnswer || (currentQ.type === "openEnded" ? "见标准答案" : ""),
+          currentQ.correctAnswer ||
+          (currentQ.type === "openEnded" ? t("assessment.evaluateAnswer") : ""),
         isCorrect: false,
-        explanation: "该题目已被用户标记为有误并跳过。",
-        isSkipped: true as any, // 扩展字段
+        explanation: t("assessment.skippedExplanation"),
+        isSkipped: true as any,
       },
     ]);
 
@@ -195,7 +198,6 @@ export default function AssessmentModal({
       let evidence: LLMEvidence;
 
       if (currentQ.type === "openEnded") {
-        // AI 深度评估
         evidence = await AssessmentService.extractEvidence(
           node.content,
           node.explanation || "",
@@ -203,15 +205,77 @@ export default function AssessmentModal({
           currentQ.referenceAnswer || "",
           userAnswer,
         );
+      } else if (currentQ.type === "fillBlank") {
+        const cleanAnswer = userAnswer.trim().toLowerCase();
+        const correctAnswer = (currentQ.correctAnswer || "").trim();
+        const referenceVariants = (currentQ.referenceAnswer || "")
+          .split(/[,;，；、/|]/)
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+
+        const allAccepted = [correctAnswer.toLowerCase(), ...referenceVariants];
+
+        const fuzzyScore = (accepted: string[]): number => {
+          if (accepted.includes(cleanAnswer)) return 1.0;
+
+          const normalize = (s: string) =>
+            s
+              .replace(/^[a-e][.、\s)]+/, "")
+              .replace(/[，,。.！!？?、：:；;""''""（）()【】[\]{}《》<>「」『』]/g, "")
+              .replace(/\s+/g, "")
+              .trim();
+          const normInput = normalize(cleanAnswer);
+          for (const candidate of accepted) {
+            const normCandidate = normalize(candidate);
+            if (normInput === normCandidate) return 0.95;
+          }
+
+          const extractKeywords = (s: string): string[] => {
+            const parts = s
+              .split(/[,，、]/)
+              .map((p) => p.trim())
+              .filter((p) => p.length >= 2);
+            if (parts.length > 0) return parts;
+            return s
+              .replace(/[^a-zA-Z\u4e00-\u9fff0-9]/g, " ")
+              .split(/\s+/)
+              .filter((w) => w.length >= 2);
+          };
+
+          const keywords = extractKeywords(correctAnswer);
+          if (keywords.length > 0) {
+            const matchCount = keywords.filter((kw) => cleanAnswer.includes(kw)).length;
+            const ratio = matchCount / keywords.length;
+            if (ratio >= 0.8) return 0.85;
+            if (ratio >= 0.5) return 0.6;
+            if (ratio > 0) return 0.4;
+          }
+
+          return 0;
+        };
+
+        const score = fuzzyScore(allAccepted);
+        const isCorrect = score >= 0.6;
+        evidence = calculateProxyEvidence(isCorrect, currentQ.difficulty);
+
+        setSessionResults((prev) => [
+          ...prev,
+          {
+            question: currentQ.question,
+            type: currentQ.type,
+            userAnswer,
+            correctAnswer: currentQ.correctAnswer || "",
+            isCorrect,
+            explanation: currentQ.explanation || "",
+          },
+        ]);
       } else {
-        // 简单对错匹配 (代理评估)
         const cleanAnswer = userAnswer.trim().toLowerCase();
         const cleanCorrect = (currentQ.correctAnswer || "").trim().toLowerCase();
 
-        // 1. 布尔映射增强 (判断题专用)
         const booleanMap: Record<string, string[]> = {
-          正确: ["正确", "对", "true", "yes", "1"],
-          错误: ["错误", "错", "false", "no", "0"],
+          [t("common.true")]: [t("common.true"), "true", "yes", "1"],
+          [t("common.false")]: [t("common.false"), "false", "no", "0"],
         };
 
         const isBooleanMatch = (input: string, target: string) => {
@@ -223,7 +287,6 @@ export default function AssessmentModal({
           return false;
         };
 
-        // 2. 匹配检查
         const isLiteralMatch = cleanAnswer === cleanCorrect;
         const isBoolMatch =
           currentQ.type === "trueFalse" && isBooleanMatch(cleanAnswer, cleanCorrect);
@@ -237,10 +300,9 @@ export default function AssessmentModal({
             );
           });
 
-        const isCorrect = isLiteralMatch || isBoolMatch || isOptionMatch;
+        const isCorrect = Boolean(isLiteralMatch || isBoolMatch || isOptionMatch);
         evidence = calculateProxyEvidence(isCorrect, currentQ.difficulty);
 
-        // 记录结果供复盘使用
         setSessionResults((prev) => [
           ...prev,
           {
@@ -254,7 +316,6 @@ export default function AssessmentModal({
         ]);
       }
 
-      // 处理问答题的结果记录 (由于 extractEvidence 是纯逻辑，我们在其后手动记录)
       if (currentQ.type === "openEnded") {
         setSessionResults((prev) => [
           ...prev,
@@ -262,8 +323,8 @@ export default function AssessmentModal({
             question: currentQ.question,
             type: currentQ.type,
             userAnswer,
-            correctAnswer: currentQ.referenceAnswer || "见 AI 评估结果",
-            isCorrect: (evidence as any).recall >= 0.6, // 简化的“正确”标记
+            correctAnswer: currentQ.referenceAnswer || t("assessment.evaluateAnswer"),
+            isCorrect: (evidence as any).recall >= 0.6,
             explanation: (evidence as any).feedback || "",
           },
         ]);
@@ -273,22 +334,19 @@ export default function AssessmentModal({
       setSessionEvidences(newEvidences);
 
       if (currentIndex < questions.length - 1) {
-        // 进入下一题
         setCurrentIndex(currentIndex + 1);
         setUserAnswer("");
         setStep("question");
       } else {
-        // 完成所有题目，进行贝叶斯更新
         finalizeSession(newEvidences);
       }
     } catch (err: any) {
-      setError("评估失败: " + err.message);
+      setError(t("assessment.evaluateError") + err.message);
       setStep("question");
     }
   };
 
   const finalizeSession = (evidences: LLMEvidence[]) => {
-    // 聚合更新 (简单的线性更新，或逐个更新)
     let currentState = (currentProject?.cognitiveStates || {})[node.id] || INITIAL_COGNITIVE_STATE;
 
     const preset = currentProject?.cognitiveConfig?.preset || "balanced";
@@ -297,8 +355,6 @@ export default function AssessmentModal({
     let lastMasteryAfter = 0;
     let firstMasteryBefore = 0;
 
-    // 过滤掉因为跳过而可能产生的空证据，或者确保 evidences 数量与题目匹配
-    // 这里的实现方式是 evidences 仅包含已回答题目产生的证据
     evidences.forEach((ev, idx) => {
       const { newState, masteryBefore, masteryAfter } = updateCognitiveState(
         currentState as CognitiveState,
@@ -326,28 +382,28 @@ export default function AssessmentModal({
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`知识诊断：${node.content}`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`${t("assessment.title")}${node.content}`}>
       <div className="assessment-container">
         {step === "setup" && (
           <div className="assessment-setup-view animate-fade-in">
             <div className="setup-header">
               <Brain size={32} className="setup-icon" />
-              <h3>深度自学考核设置</h3>
+              <h3>{t("assessment.setup")}</h3>
             </div>
 
             <div className="setup-section">
-              <label>诊断人设与要求</label>
+              <label>{t("assessment.personaLabel")}</label>
               <div className="difficulty-prompt-container">
                 <textarea
                   className="difficulty-textarea"
-                  placeholder="例如：考考我最底层的实现原理，对比类似技术方案..."
+                  placeholder={t("assessment.personaPlaceholder")}
                   value={difficultyPrompt}
                   onChange={(e) => setDifficultyPrompt(e.target.value)}
                 />
                 <button
                   className={`optimize-btn ${isOptimizing ? "loading" : ""}`}
                   onClick={optimizeDifficultyPrompt}
-                  title="AI 优化指令"
+                  title={t("assessment.optimizeTooltip")}
                 >
                   <Sparkles size={16} />
                 </button>
@@ -366,44 +422,53 @@ export default function AssessmentModal({
             </div>
 
             <div className="setup-section">
-              <label>题型偏好 (多选)</label>
+              <label>{t("assessment.questionType")}</label>
               <div className="type-selector">
                 <button
                   type="button"
                   className={`type-chip auto ${allowedTypes.length === 0 ? "active" : ""}`}
                   onClick={() => setAllowedTypes([])}
                 >
-                  <Sparkles size={14} /> 自动
+                  <Sparkles size={14} /> {t("assessment.typeAuto")}
                 </button>
                 <button
                   type="button"
                   className={`type-chip ${allowedTypes.includes("openEnded") ? "active" : ""}`}
                   onClick={() => toggleType("openEnded")}
                 >
-                  <Send size={14} /> 问答
+                  <Send size={14} /> {t("assessment.typeQA")}
                 </button>
                 <button
                   type="button"
                   className={`type-chip ${allowedTypes.includes("choice") ? "active" : ""}`}
                   onClick={() => toggleType("choice")}
                 >
-                  <ListChecks size={14} /> 选择
+                  <ListChecks size={14} /> {t("assessment.typeChoice")}
                 </button>
                 <button
                   type="button"
                   className={`type-chip ${allowedTypes.includes("trueFalse") ? "active" : ""}`}
                   onClick={() => toggleType("trueFalse")}
                 >
-                  <HelpCircle size={14} /> 判断
+                  <HelpCircle size={14} /> {t("assessment.typeTrueFalse")}
+                </button>
+                <button
+                  type="button"
+                  className={`type-chip ${allowedTypes.includes("fillBlank") ? "active" : ""}`}
+                  onClick={() => toggleType("fillBlank")}
+                >
+                  <Layers size={14} /> {t("assessment.typeFillBlank")}
                 </button>
               </div>
             </div>
 
             <div className="setup-section">
               <div className="section-label-group">
-                <label>题目数量</label>
+                <label>{t("assessment.questionCount")}</label>
                 <span className="count-value">
-                  {questionCount === 0 ? "AI 自动" : `${questionCount} 道`}
+                  {questionCount === 0
+                    ? t("assessment.countAuto")
+                    : t("assessment.countTemplate", { count: String(questionCount) })}
                 </span>
               </div>
               <div className="count-selector-group">
@@ -412,7 +477,7 @@ export default function AssessmentModal({
                   className={`auto-count-btn ${questionCount === 0 ? "active" : ""}`}
                   onClick={() => setQuestionCount(questionCount === 0 ? 3 : 0)}
                 >
-                  <Sparkles size={14} /> 自动
+                  <Sparkles size={14} /> {t("assessment.typeAuto")}
                 </button>
                 <input
                   type="range"
@@ -429,8 +494,12 @@ export default function AssessmentModal({
               <div className="warning-item token">
                 <AlertCircle size={14} />
                 <span>
-                  预计 Token 消耗：
-                  {questionCount === 0 ? "AI 动态确定" : questionCount > 5 ? "较高" : "正常"}
+                  {t("assessment.warningToken")}
+                  {questionCount === 0
+                    ? t("assessment.warningAuto")
+                    : questionCount > 5
+                      ? t("assessment.warningHigh")
+                      : t("assessment.warningNormal")}
                 </span>
               </div>
               {(questionCount > 5 || questionCount === 0) && (
@@ -438,8 +507,8 @@ export default function AssessmentModal({
                   <Layers size={14} />
                   <span>
                     {questionCount === 0
-                      ? "自动模式下 AI 将生成 2-5 道题以保证诊断深度。"
-                      : "建议一次不要生成过多题目，避免 AI 注意力缺陷导致质量下降。"}
+                      ? t("assessment.warningAutoMode")
+                      : t("assessment.warningTooMany")}
                   </span>
                 </div>
               )}
@@ -448,7 +517,7 @@ export default function AssessmentModal({
             {error && <p className="setup-error">{error}</p>}
 
             <button className="btn-primary start-btn" onClick={initAssessment}>
-              启动诊断
+              {t("assessment.start")}
             </button>
           </div>
         )}
@@ -456,7 +525,7 @@ export default function AssessmentModal({
         {step === "loading" && (
           <div className="assessment-state-view animate-fade-in">
             <Loader2 className="spinner" size={40} />
-            <p>AI 正在根据你的偏好构建测验模块...</p>
+            <p>{t("assessment.loading")}</p>
           </div>
         )}
 
@@ -468,7 +537,10 @@ export default function AssessmentModal({
                 style={{ width: `${(currentIndex / questions.length) * 100}%` }}
               />
               <span className="progress-text">
-                第 {currentIndex + 1} / {questions.length} 题
+                {t("assessment.progress", {
+                  current: String(currentIndex + 1),
+                  total: String(questions.length),
+                })}
               </span>
             </div>
 
@@ -484,11 +556,29 @@ export default function AssessmentModal({
               {questions[currentIndex].type === "openEnded" ? (
                 <textarea
                   className="answer-input"
-                  placeholder="请输入你的解答..."
+                  placeholder={t("assessment.answerPlaceholder")}
                   value={userAnswer}
                   onChange={(e) => setUserAnswer(e.target.value)}
                   autoFocus
                 />
+              ) : questions[currentIndex].type === "fillBlank" ? (
+                <div className="fillblank-container">
+                  <p className="fillblank-hint">{t("assessment.fillBlankHint")}</p>
+                  <input
+                    className="fillblank-input"
+                    type="text"
+                    placeholder={t("assessment.fillBlankInput")}
+                    value={userAnswer}
+                    onChange={(e) => setUserAnswer(e.target.value)}
+                    autoFocus
+                  />
+                  {questions[currentIndex].referenceAnswer && (
+                    <details className="fillblank-hint-details">
+                      <summary>{t("assessment.fillBlankTip")}</summary>
+                      <p>{t("assessment.fillBlankTipDesc")}</p>
+                    </details>
+                  )}
+                </div>
               ) : questions[currentIndex].type === "choice" ? (
                 <div className="choice-list">
                   {questions[currentIndex].options?.map((opt, i) => (
@@ -504,7 +594,7 @@ export default function AssessmentModal({
                 </div>
               ) : (
                 <div className="boolean-list">
-                  {["正确", "错误"].map((opt) => (
+                  {[t("common.true"), t("common.false")].map((opt) => (
                     <button
                       key={opt}
                       className={`boolean-item ${userAnswer === opt ? "selected" : ""}`}
@@ -519,14 +609,15 @@ export default function AssessmentModal({
 
             <div className="assessment-actions">
               <div className="question-error-control">
-                <button className="error-report-trigger" title="题目有误？">
-                  <AlertTriangle size={14} /> 题目有误
+                <button className="error-report-trigger" title={t("assessment.bugReport")}>
+                  <AlertTriangle size={14} /> {t("assessment.bugReport")}
                   <div className="error-actions-popover">
                     <button onClick={handleRegenerateQuestion} disabled={isRegenerating}>
-                      <RefreshCw size={12} className={isRegenerating ? "spinner" : ""} /> 重新生成
+                      <RefreshCw size={12} className={isRegenerating ? "spinner" : ""} />{" "}
+                      {t("assessment.regenerate")}
                     </button>
                     <button onClick={handleSkipQuestion}>
-                      <SkipForward size={12} /> 跳过此题
+                      <SkipForward size={12} /> {t("assessment.skip")}
                     </button>
                   </div>
                 </button>
@@ -537,7 +628,9 @@ export default function AssessmentModal({
                 onClick={handleAnswerSubmit}
                 disabled={!userAnswer.trim()}
               >
-                {currentIndex === questions.length - 1 ? "提交测验" : "下一题"}{" "}
+                {currentIndex === questions.length - 1
+                  ? t("assessment.submit")
+                  : t("assessment.nextQuestion")}{" "}
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -547,27 +640,27 @@ export default function AssessmentModal({
         {step === "evaluating" && (
           <div className="assessment-state-view animate-fade-in">
             <Loader2 className="spinner" size={40} />
-            <p>正在同步诊断结果...</p>
+            <p>{t("assessment.evaluating")}</p>
           </div>
         )}
 
         {step === "summary" && (
           <div className="assessment-feedback-view animate-slide-up">
             <h3 className="summary-title">
-              <Sparkles size={20} /> 深度诊断报告
+              <Sparkles size={20} /> {t("assessment.reportTitle")}
             </h3>
 
             <div className="mastery-shift-card">
               <div className="mastery-score-group">
                 <div className="score-item">
-                  <span className="label">评估前</span>
+                  <span className="label">{t("assessment.beforeScore")}</span>
                   <span className="value">
                     {formatMasteryPercentage(masteryData?.before || 0)}%
                   </span>
                 </div>
                 <ArrowRight size={24} className="shift-arrow" />
                 <div className="score-item after">
-                  <span className="label">评估后掌握度</span>
+                  <span className="label">{t("assessment.afterScore")}</span>
                   <span className="value">{formatMasteryPercentage(masteryData?.after || 0)}%</span>
                 </div>
               </div>
@@ -578,12 +671,58 @@ export default function AssessmentModal({
                   style={{ width: `${(masteryData?.after || 0) * 100}%` }}
                 />
               </div>
+
+              {(() => {
+                const state = (currentProject?.cognitiveStates || {})[node.id];
+                if (state) {
+                  const ci = calculateConfidenceInterval(state.alpha, state.beta);
+                  const width = ci.upper - ci.lower;
+                  const evidenceLevel =
+                    ci.evidenceCount < 5
+                      ? t("assessment.ciLow")
+                      : ci.evidenceCount < 20
+                        ? t("assessment.ciMedium")
+                        : t("assessment.ciHigh");
+                  return (
+                    <div className="confidence-interval-display">
+                      <div className="ci-bar">
+                        <div
+                          className="ci-range"
+                          style={{
+                            left: `${ci.lower * 100}%`,
+                            width: `${width * 100}%`,
+                          }}
+                        />
+                        <div
+                          className="ci-point"
+                          style={{ left: `${((ci.lower + ci.upper) / 2) * 100}%` }}
+                        />
+                      </div>
+                      <div className="ci-labels">
+                        <span>
+                          {t("assessment.ciLabel", {
+                            lower: String(Math.round(ci.lower * 100)),
+                            upper: String(Math.round(ci.upper * 100)),
+                          })}
+                        </span>
+                        <span className="ci-evidence">
+                          {t("assessment.ciEvidence", {
+                            level: evidenceLevel,
+                            count: String(ci.evidenceCount),
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             <div className="diagnostic-details">
               <div className="detail-section">
                 <h4>
-                  <Layers size={16} /> 认知维度细分
+                  <Layers size={16} /> {t("assessment.cognitiveTitle")}
                 </h4>
                 <div className="dimension-grid">
                   {["recall", "comprehension", "application", "analysis"].map((dim) => {
@@ -596,12 +735,12 @@ export default function AssessmentModal({
                         : 0;
                     const label =
                       dim === "recall"
-                        ? "核心记忆"
+                        ? t("assessment.dimensionRecall")
                         : dim === "comprehension"
-                          ? "概念理解"
+                          ? t("assessment.dimensionComprehension")
                           : dim === "application"
-                            ? "知识应用"
-                            : "深度分析";
+                            ? t("assessment.dimensionApplication")
+                            : t("assessment.dimensionAnalysis");
                     return (
                       <div key={dim} className="dimension-item">
                         <div className="dim-label">
@@ -620,7 +759,7 @@ export default function AssessmentModal({
               {sessionEvidences.some((ev) => ev.suggestion) && (
                 <div className="detail-section highlight">
                   <h4>
-                    <Brain size={16} /> AI 学习建议
+                    <Brain size={16} /> {t("assessment.suggestionTitle")}
                   </h4>
                   <ul className="suggestion-list">
                     {Array.from(
@@ -636,7 +775,7 @@ export default function AssessmentModal({
 
               <div className="detail-section review-section">
                 <h4>
-                  <ListChecks size={16} /> 测验复盘
+                  <ListChecks size={16} /> {t("assessment.reviewTitle")}
                 </h4>
                 <div className="review-list">
                   {sessionResults.map((res: any, i) => (
@@ -657,7 +796,7 @@ export default function AssessmentModal({
                       <p className="review-q-text">{res.question}</p>
                       <div className="answer-grid">
                         <div className="answer-col">
-                          <span className="label">你的回答</span>
+                          <span className="label">{t("assessment.yourAnswer")}</span>
                           <span
                             className={`val ${res.isSkipped ? "dim" : res.isCorrect ? "correct" : "incorrect"}`}
                           >
@@ -665,13 +804,13 @@ export default function AssessmentModal({
                           </span>
                         </div>
                         <div className="answer-col">
-                          <span className="label">正确答案</span>
+                          <span className="label">{t("assessment.correctAnswer")}</span>
                           <span className="val primary">{res.correctAnswer}</span>
                         </div>
                       </div>
                       {res.explanation && (
                         <div className="review-explanation">
-                          <strong>解析：</strong>
+                          <strong>{t("assessment.explanation")}</strong>
                           {res.explanation}
                         </div>
                       )}
@@ -683,32 +822,15 @@ export default function AssessmentModal({
 
             <div className="assessment-actions">
               <button className="btn-secondary" onClick={onClose}>
-                返回导图
+                {t("assessment.backToMindmap")}
               </button>
               <button className="btn-primary" onClick={() => setStep("setup")}>
-                再次诊断
+                {t("assessment.retake")}
               </button>
             </div>
           </div>
         )}
       </div>
     </Modal>
-  );
-}
-
-function EvidenceItem({ label, value }: { label: string; value: number }) {
-  const percentage = Math.round(value * 100);
-  let colorClass = "low";
-  if (value >= 0.8) colorClass = "high";
-  else if (value >= 0.5) colorClass = "medium";
-
-  return (
-    <div className={`evidence-item ${colorClass}`}>
-      <span className="evidence-label">{label}</span>
-      <div className="evidence-track">
-        <div className="evidence-fill" style={{ width: `${percentage}%` }} />
-      </div>
-      <span className="evidence-value">{percentage}%</span>
-    </div>
   );
 }

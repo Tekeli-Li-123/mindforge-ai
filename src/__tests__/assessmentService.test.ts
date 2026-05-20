@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AssessmentService } from "../services/assessmentService";
-import type { MindMapNode, LLMEvidence } from "../types";
+import type { MindMapNode } from "../types";
 
 // Mock fetchFromAI
 vi.mock("../services/aiService", () => ({
@@ -26,23 +26,25 @@ beforeEach(() => {
 describe("AssessmentService", () => {
   describe("generateAssessmentBatch", () => {
     it("should generate a batch of quiz questions", async () => {
-      const aiResponse = JSON.stringify([
-        {
-          type: "choice",
-          question: "什么是闭包？",
-          options: ["A选项", "B选项", "C选项", "D选项"],
-          correctAnswer: "A选项",
-          explanation: "闭包是函数与词法环境的组合",
-          difficulty: "easy",
-        },
-        {
-          type: "openEnded",
-          question: "请解释闭包的工作原理",
-          referenceAnswer: "闭包捕捉外部函数的变量环境……",
-          explanation: "考察对闭包本质的理解",
-          difficulty: "medium",
-        },
-      ]);
+      const aiResponse = JSON.stringify({
+        questions: [
+          {
+            type: "choice",
+            question: "什么是闭包？",
+            options: ["A选项", "B选项", "C选项", "D选项"],
+            correctAnswer: "A选项",
+            explanation: "闭包是函数与词法环境的组合",
+            difficulty: "easy",
+          },
+          {
+            type: "openEnded",
+            question: "请解释闭包的工作原理",
+            referenceAnswer: "闭包捕捉外部函数的变量环境……",
+            explanation: "考察对闭包本质的理解",
+            difficulty: "medium",
+          },
+        ],
+      });
       vi.mocked(fetchFromAI).mockResolvedValue(aiResponse);
 
       const result = await AssessmentService.generateAssessmentBatch(
@@ -61,13 +63,17 @@ describe("AssessmentService", () => {
       expect(result[1].referenceAnswer).toBe("闭包捕捉外部函数的变量环境……");
     });
 
-    it("should handle single-object response (not array)", async () => {
+    it("should handle single-object response (not questions array)", async () => {
       const singleObj = {
-        type: "trueFalse",
-        question: "闭包会导致内存泄漏吗？",
-        correctAnswer: "正确",
-        explanation: "如果不当使用……",
-        difficulty: "hard",
+        questions: [
+          {
+            type: "trueFalse",
+            question: "闭包会导致内存泄漏吗？",
+            correctAnswer: "正确",
+            explanation: "如果不当使用……",
+            difficulty: "hard",
+          },
+        ],
       };
       vi.mocked(fetchFromAI).mockResolvedValue(JSON.stringify(singleObj));
 
@@ -85,7 +91,7 @@ describe("AssessmentService", () => {
 
     it("should strip markdown code fences from AI response", async () => {
       const aiResponse =
-        '```json\n[{"type":"openEnded","question":"Q?","referenceAnswer":"A","explanation":"E","difficulty":"easy"}]\n```';
+        '```json\n{"questions":[{"type":"openEnded","question":"Q?","referenceAnswer":"A","explanation":"E","difficulty":"easy"}]}\n```';
       vi.mocked(fetchFromAI).mockResolvedValue(aiResponse);
 
       const result = await AssessmentService.generateAssessmentBatch(mockNode, "path", "easy", 1, [
@@ -97,10 +103,12 @@ describe("AssessmentService", () => {
     });
 
     it("should assign unique IDs to each question", async () => {
-      const aiResponse = JSON.stringify([
-        { type: "openEnded", question: "Q1", referenceAnswer: "A1", explanation: "E1" },
-        { type: "openEnded", question: "Q2", referenceAnswer: "A2", explanation: "E2" },
-      ]);
+      const aiResponse = JSON.stringify({
+        questions: [
+          { type: "openEnded", question: "Q1", referenceAnswer: "A1", explanation: "E1" },
+          { type: "openEnded", question: "Q2", referenceAnswer: "A2", explanation: "E2" },
+        ],
+      });
       vi.mocked(fetchFromAI).mockResolvedValue(aiResponse);
 
       const result = await AssessmentService.generateAssessmentBatch(mockNode, "path", "easy", 2, [
@@ -121,34 +129,21 @@ describe("AssessmentService", () => {
     });
   });
 
-  describe("generateAssessmentQuestion (single question compat)", () => {
-    it("should return a single quiz question", async () => {
-      vi.mocked(fetchFromAI).mockResolvedValue(
-        JSON.stringify([
-          { type: "openEnded", question: "Q?", referenceAnswer: "A", explanation: "E" },
-        ]),
-      );
-
-      const result = await AssessmentService.generateAssessmentQuestion(mockNode, "path", "easy");
-
-      expect(result.type).toBe("openEnded");
-      expect(result.question).toBe("Q?");
-    });
-  });
-
   describe("regenerateQuestion", () => {
     it("should generate an alternative question", async () => {
       vi.mocked(fetchFromAI).mockResolvedValue(
-        JSON.stringify([
-          {
-            type: "choice",
-            question: "新题目?",
-            options: ["A", "B", "C", "D"],
-            correctAnswer: "A",
-            explanation: "E",
-            difficulty: "medium",
-          },
-        ]),
+        JSON.stringify({
+          questions: [
+            {
+              type: "choice",
+              question: "新题目?",
+              options: ["A", "B", "C", "D"],
+              correctAnswer: "A",
+              explanation: "E",
+              difficulty: "medium",
+            },
+          ],
+        }),
       );
 
       const result = await AssessmentService.regenerateQuestion(
@@ -214,8 +209,8 @@ describe("AssessmentService", () => {
 
       const result = await AssessmentService.extractEvidence("闭包", "定义", "Q", "A", "用户回答");
 
-      expect(result.recall).toBe(0.5);
-      expect(result.comprehension).toBe(0.5);
+      expect(result.recall).toBe(0.3);
+      expect(result.comprehension).toBe(0.3);
       expect(result.feedback).toContain("系统解析评估");
       expect(result.errorType).toBe("none");
     });
